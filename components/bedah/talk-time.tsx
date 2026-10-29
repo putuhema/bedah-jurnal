@@ -14,7 +14,11 @@ import {
 import { advanceTalk, archiveEdition, saveLearning } from "@/app/actions"
 import { Presence, TopBar } from "@/components/bedah/bits"
 import { ArticleViewer } from "@/components/bedah/article-viewer"
-import { PdfViewer } from "@/components/bedah/pdf-viewer"
+import {
+  formatZoom,
+  nextZoomLevel,
+  PdfViewer,
+} from "@/components/bedah/pdf-viewer"
 import { spotLabel } from "@/lib/position"
 import { useRoom } from "@/components/bedah/room-context"
 import { Button } from "@/components/ui/button"
@@ -107,9 +111,7 @@ export function TalkTime({
 
   useHotkey("arrowright", () => void next(), talking && mine)
   useHotkey("enter", () => void next(), talking && mine)
-  useHotkey("z", () =>
-    setZoom((z) => [1, 1.5, 2][([1, 1.5, 2].indexOf(z) + 1) % 3])
-  )
+  useHotkey("z", () => setZoom(nextZoomLevel))
 
   const summary =
     talking && card
@@ -127,13 +129,11 @@ export function TalkTime({
         <Button
           variant="ghost"
           size="sm"
-          onClick={() =>
-            setZoom((z) => [1, 1.5, 2][([1, 1.5, 2].indexOf(z) + 1) % 3])
-          }
+          onClick={() => setZoom(nextZoomLevel)}
           aria-label="Perbesar halaman"
         >
           <ZoomInIcon data-icon="inline-start" />
-          {zoom}×
+          {formatZoom(zoom)}
         </Button>
         <Presence />
       </TopBar>
@@ -146,6 +146,7 @@ export function TalkTime({
             source={edition.source}
             sourceUrl={edition.sourceUrl}
             zoom={zoom}
+            onZoomChange={setZoom}
             marks={marks}
             initialPage={1}
             partner={null}
@@ -160,6 +161,7 @@ export function TalkTime({
             url={pdfUrl}
             pageCount={edition.pageCount}
             zoom={zoom}
+            onZoomChange={setZoom}
             marks={marks}
             initialPage={focusMark?.page ?? 1}
             partner={null}

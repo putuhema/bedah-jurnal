@@ -21,12 +21,20 @@ const plexSerif = IBM_Plex_Serif({
 export const metadata: Metadata = {
   title: "Bedah Jurnal",
   description: "Satu jurnal seminggu, berdua dari jauh.",
+  applicationName: "Bedah Jurnal",
+  appleWebApp: {
+    capable: true,
+    title: "Bedah Jurnal",
+    statusBarStyle: "default",
+  },
+  formatDetection: { telephone: false },
 }
 
 export const viewport: Viewport = {
   themeColor: "#f4f4f2",
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
 }
 
 export default function RootLayout({

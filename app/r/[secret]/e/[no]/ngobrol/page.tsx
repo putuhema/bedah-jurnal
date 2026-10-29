@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { notFound } from "next/navigation"
+import { notFound, redirect } from "next/navigation"
 
 import { TopBar } from "@/components/bedah/bits"
 import { TalkTime } from "@/components/bedah/talk-time"
@@ -31,7 +31,8 @@ export default async function TalkPage({
   const seat = await getSeat(room)
   if (!seat) notFound()
   const edition = await getEditionByNumber(room.id, Number(no))
-  if (!edition) notFound()
+  // e.g. it was just swapped for another reading
+  if (!edition) redirect(`/r/${secret}`)
 
   if (!edition.revealedAt) {
     return (

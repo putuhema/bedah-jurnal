@@ -44,6 +44,8 @@ type Props = {
   pageCount: number
   /** 1 = fit the screen width; larger values scroll sideways. */
   zoom: number
+  /** Pinching the paper with two fingers asks for a new zoom (1 to MAX_ZOOM). */
+  onZoomChange?: (zoom: number) => void
   marks: Mark[]
   initialPage: number
   partner: { seat: Seat; name: string; page: number | null } | null
@@ -77,6 +79,19 @@ export type AiSpot = {
 
 /** Widest a page gets at 1×, so desktop pages stay a readable size. */
 const MAX_FIT_WIDTH = 880
+export const MAX_ZOOM = 4
+/** Pixels per page canvas. Phones refuse (or crash on) bigger canvases. */
+const MAX_CANVAS_PIXELS = 10_000_000
+
+/** "1×", "1.5×", 2.35 → "2.4×" */
+export function formatZoom(zoom: number) {
+  return `${Math.round(zoom * 10) / 10}×`
+}
+
+/** The zoom button: 1× → 1.5× → 2× → back to 1× (from any pinched value). */
+export function nextZoomLevel(zoom: number) {
+  return [1.5, 2].find((level) => level > zoom + 0.01) ?? 1
+}
 
 /** Merge per-span rectangles on the same line into one, so a sentence becomes a few bars. */
 function mergeRects(rects: Rect[]): Rect[] {
@@ -109,6 +124,7 @@ export const PdfViewer = React.forwardRef<PdfViewerHandle, Props>(
       url,
       pageCount,
       zoom,
+      onZoomChange,
       marks,
       initialPage,
       partner,
@@ -123,6 +139,7 @@ export const PdfViewer = React.forwardRef<PdfViewerHandle, Props>(
     },
     ref
   ) {
+    const contentRef = React.useRef<HTMLDivElement>(null)
     // the reader's own scroll area (both directions), so zoomed pages can be panned
     const wrapRef = React.useRef<HTMLDivElement | null>(null)
     const [scrollEl, setScrollEl] = React.useState<HTMLDivElement | null>(null)
@@ -180,6 +197,117 @@ export const PdfViewer = React.forwardRef<PdfViewerHandle, Props>(
       observer.observe(el)
       return () => observer.disconnect()
     }, [])
+
+    // pinch with two fingers: scale the pages with CSS while the fingers move,
+    // then re-render them sharp at the new zoom, keeping the spot under your fingers
+    const zoomRef = React.useRef(zoom)
+    const zoomChange = React.useRef(onZoomChange)
+    React.useEffect(() => {
+      zoomRef.current = zoom
+      zoomChange.current = onZoomChange
+    })
+    const pinchAnchor = React.useRef<{
+      page: number
+      relX: number
+      relY: number
+      fx: number
+      fy: number
+    } | null>(null)
+    React.useEffect(() => {
+      const area = scrollEl
+      const content = contentRef.current
+      if (!area || !content) return
+      let start: {
+        dist: number
+        zoom: number
+        page: number
+        relX: number
+        relY: number
+        fx: number
+        fy: number
+      } | null = null
+      let next = 1
+
+      const distance = (t: TouchList) =>
+        Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+
+      function onStart(event: TouchEvent) {
+        if (event.touches.length !== 2 || !zoomChange.current) return
+        const [t1, t2] = [event.touches[0], event.touches[1]]
+        const cx = (t1.clientX + t2.clientX) / 2
+        const cy = (t1.clientY + t2.clientY) / 2
+        const box = area!.getBoundingClientRect()
+        const pages = Array.from(
+          area!.querySelectorAll<HTMLElement>("[data-page]")
+        )
+        // the page under the fingers (or the nearest one, in a gap)
+        let target = pages[0]
+        let best = Infinity
+        for (const el of pages) {
+          const r = el.getBoundingClientRect()
+          const d = cy < r.top ? r.top - cy : cy > r.bottom ? cy - r.bottom : 0
+          if (d < best) {
+            best = d
+            target = el
+          }
+          if (d === 0) break
+        }
+        if (!target) return
+        const pageBox = target.getBoundingClientRect()
+        const contentBox = content!.getBoundingClientRect()
+        start = {
+          dist: distance(event.touches),
+          zoom: zoomRef.current,
+          page: Number(target.dataset.page),
+          relX: (cx - pageBox.left) / pageBox.width,
+          relY: (cy - pageBox.top) / pageBox.height,
+          fx: cx - box.left,
+          fy: cy - box.top,
+        }
+        next = start.zoom
+        content!.style.transformOrigin = `${cx - contentBox.left}px ${cy - contentBox.top}px`
+        content!.style.willChange = "transform"
+      }
+
+      function onMove(event: TouchEvent) {
+        if (!start || event.touches.length !== 2) return
+        event.preventDefault()
+        next = Math.min(
+          MAX_ZOOM,
+          Math.max(1, (start.zoom * distance(event.touches)) / start.dist)
+        )
+        content!.style.transform = `scale(${next / start.zoom})`
+      }
+
+      function onEnd(event: TouchEvent) {
+        if (!start || event.touches.length >= 2) return
+        const done = start
+        start = null
+        content!.style.transform = ""
+        content!.style.transformOrigin = ""
+        content!.style.willChange = ""
+        const rounded = Math.round(next * 20) / 20
+        if (Math.abs(rounded - done.zoom) < 0.05) return
+        pinchAnchor.current = done
+        zoomChange.current?.(rounded)
+      }
+
+      // Safari's own page zoom
+      const stopGesture = (event: Event) => event.preventDefault()
+
+      area.addEventListener("touchstart", onStart, { passive: true })
+      area.addEventListener("touchmove", onMove, { passive: false })
+      area.addEventListener("touchend", onEnd)
+      area.addEventListener("touchcancel", onEnd)
+      area.addEventListener("gesturestart", stopGesture)
+      return () => {
+        area.removeEventListener("touchstart", onStart)
+        area.removeEventListener("touchmove", onMove)
+        area.removeEventListener("touchend", onEnd)
+        area.removeEventListener("touchcancel", onEnd)
+        area.removeEventListener("gesturestart", stopGesture)
+      }
+    }, [scrollEl])
 
     // which page is in view
     const pageChange = React.useRef(onPageChange)
@@ -402,21 +530,37 @@ export const PdfViewer = React.forwardRef<PdfViewerHandle, Props>(
       [onMarkTag]
     )
 
+    const pageWidth = Math.floor(Math.min(width, MAX_FIT_WIDTH) * zoom)
+
+    // after a pinch, put the spot that was under your fingers back under them
+    React.useLayoutEffect(() => {
+      const anchor = pinchAnchor.current
+      const area = wrapRef.current
+      if (!anchor || !area) return
+      pinchAnchor.current = null
+      const page = area.querySelector<HTMLElement>(
+        `[data-page="${anchor.page}"]`
+      )
+      if (!page) return
+      area.scrollLeft =
+        page.offsetLeft + anchor.relX * page.offsetWidth - anchor.fx
+      area.scrollTop =
+        page.offsetTop + anchor.relY * page.offsetHeight - anchor.fy
+    }, [pageWidth])
+
     if (error) {
       return (
         <p className="px-4 py-16 text-center text-muted-foreground">{error}</p>
       )
     }
 
-    const pageWidth = Math.floor(Math.min(width, MAX_FIT_WIDTH) * zoom)
-
     return (
       <div
         ref={setWrap}
         data-slot="reader-scroll"
-        className="relative min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain px-0 py-4 sm:px-4"
+        className="relative min-h-0 min-w-0 flex-1 touch-pan-x touch-pan-y overflow-auto overscroll-contain px-0 pt-4 pb-[calc(var(--nav-space,0px)+1rem)] sm:px-4"
       >
-        <div className="mx-auto flex w-max flex-col gap-3">
+        <div ref={contentRef} className="mx-auto flex w-max flex-col gap-3">
           {width > 0 &&
             Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
               <PdfPage
@@ -498,9 +642,20 @@ function PdfPage({
     const el = boxRef.current
     if (!el || !root) return
     // render pages a bit before they scroll into the reader's view
+    // pages far outside the view give their canvas back, so long papers stay light
     const observer = new IntersectionObserver(
-      ([entry]) => entry.isIntersecting && setVisible(true),
-      { root, rootMargin: "1200px 600px" }
+      ([entry]) => {
+        setVisible(entry.isIntersecting)
+        if (entry.isIntersecting) return
+        const canvas = canvasRef.current
+        if (canvas && canvas.width > 0) {
+          canvas.width = 0
+          canvas.height = 0
+          textRef.current?.replaceChildren()
+          setRendered(false)
+        }
+      },
+      { root, rootMargin: "1500px 600px" }
     )
     observer.observe(el)
     return () => observer.disconnect()
@@ -525,20 +680,30 @@ function PdfPage({
       const text = textRef.current
       if (!canvas || !box || !text) return
 
-      const dpr = Math.min(window.devicePixelRatio || 1, 2.5)
-      canvas.width = Math.floor(viewport.width * dpr)
-      canvas.height = Math.floor(viewport.height * dpr)
-      canvas.style.width = `${Math.floor(viewport.width)}px`
-      canvas.style.height = `${Math.floor(viewport.height)}px`
-      box.style.setProperty("--total-scale-factor", String(scale))
-      box.style.setProperty("--scale-factor", String(scale))
-
+      // sharp on high-density screens, but within what a phone can hold
+      const dpr = Math.min(
+        window.devicePixelRatio || 1,
+        3,
+        Math.sqrt(MAX_CANVAS_PIXELS / (viewport.width * viewport.height))
+      )
+      // draw off-screen first: the old picture stays (stretched) until the new one is ready
+      const scratch = document.createElement("canvas")
+      scratch.width = Math.floor(viewport.width * dpr)
+      scratch.height = Math.floor(viewport.height * dpr)
       task = page.render({
-        canvas,
+        canvas: scratch,
         viewport,
         transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
       })
       await task.promise
+      if (cancelled) return
+      canvas.width = scratch.width
+      canvas.height = scratch.height
+      canvas.getContext("2d")?.drawImage(scratch, 0, 0)
+      scratch.width = 0
+      scratch.height = 0
+      box.style.setProperty("--total-scale-factor", String(scale))
+      box.style.setProperty("--scale-factor", String(scale))
 
       text.replaceChildren()
       const layer = new pdfjs.TextLayer({
@@ -569,7 +734,10 @@ function PdfPage({
       style={{ width, height }}
     >
       {!rendered && <Skeleton className="absolute inset-0 rounded-none" />}
-      <canvas ref={canvasRef} className="absolute inset-0 select-none" />
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 size-full select-none"
+      />
 
       {/* highlights sit under the transparent text layer so text stays selectable */}
       <div className="pointer-events-none absolute inset-0 z-[1]">

@@ -75,13 +75,20 @@ function titleFromFile(name: string) {
 export function AddEditionDialog({
   nextNumber,
   trigger,
+  defaultOpen = false,
 }: {
   nextNumber: number
   trigger?: React.ReactNode
+  /** open right away (after "Ganti bacaan") */
+  defaultOpen?: boolean
 }) {
   const router = useRouter()
   const { secret, notifyChanged } = useRoom()
-  const [open, setOpen] = React.useState(false)
+  const [open, setOpen] = React.useState(defaultOpen)
+  React.useEffect(() => {
+    // drop ?tambah=1 so a reload doesn't open it again
+    if (defaultOpen) window.history.replaceState(null, "", `/r/${secret}`)
+  }, [defaultOpen, secret])
   const [busy, setBusy] = React.useState(false)
   useHotkey("n", () => setOpen(true))
 
@@ -411,6 +418,7 @@ function UploadPdf({ onBusy, onCreated }: StepProps) {
         .storage.from("journals")
         .uploadToSignedUrl(upload.data.path, upload.data.token, file, {
           contentType: "application/pdf",
+          cacheControl: "86400",
         })
       if (uploadError) throw new Error("Upload gagal. Coba lagi.")
 

@@ -1,7 +1,5 @@
 "use client"
 
-import Link from "next/link"
-import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 
 import { useRoom } from "@/components/bedah/room-context"
@@ -130,61 +128,5 @@ export function Cover({
         No.{number}
       </span>
     </div>
-  )
-}
-
-export function BottomTabs() {
-  const { secret, currentEdition } = useRoom()
-  const pathname = usePathname()
-  const base = `/r/${secret}`
-  const active = pathname.endsWith("/kamus")
-    ? "kamus"
-    : pathname.endsWith("/ngobrol")
-      ? "ngobrol"
-      : pathname.includes("/e/")
-        ? "ruang"
-        : "rak"
-
-  const tabs = [
-    { id: "rak", label: "Rak", href: base },
-    {
-      id: "ruang",
-      label: "Ruang",
-      href: currentEdition ? `${base}/e/${currentEdition}` : null,
-    },
-    {
-      id: "ngobrol",
-      label: "Ngobrol",
-      href: currentEdition ? `${base}/e/${currentEdition}/ngobrol` : null,
-    },
-    { id: "kamus", label: "Kamus", href: `${base}/kamus` },
-  ] as const
-
-  return (
-    <nav className="z-30 grid shrink-0 grid-cols-4 border-t border-rail bg-card pb-[env(safe-area-inset-bottom)]">
-      {tabs.map((tab) =>
-        tab.href ? (
-          <Link
-            key={tab.id}
-            href={tab.href}
-            className={cn(
-              "-mt-px border-t py-3 text-center text-xs transition-colors",
-              active === tab.id
-                ? "border-foreground text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {tab.label}
-          </Link>
-        ) : (
-          <span
-            key={tab.id}
-            className="py-3 text-center text-xs text-muted-foreground/50"
-          >
-            {tab.label}
-          </span>
-        )
-      )}
-    </nav>
   )
 }

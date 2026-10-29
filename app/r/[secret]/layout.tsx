@@ -1,9 +1,21 @@
+import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 
 import { RoomProvider } from "@/components/bedah/room-context"
-import { BottomTabs } from "@/components/bedah/bits"
+import { RoomShell } from "@/components/bedah/floating-nav"
 import { SeatPicker } from "@/components/bedah/seat-picker"
-import { getCurrentEdition, getRoom, getSeat } from "@/lib/room"
+import { getCurrentEdition, getProgress, getRoom, getSeat } from "@/lib/room"
+
+export async function generateMetadata({
+  params,
+}: LayoutProps<"/r/[secret]">): Promise<Metadata> {
+  const { secret } = await params
+  // installing from here opens this room
+  return {
+    manifest: `/r/${secret}/manifest.webmanifest`,
+    robots: { index: false, follow: false },
+  }
+}
 
 export default async function RoomLayout({
   children,
@@ -17,6 +29,11 @@ export default async function RoomLayout({
   if (!seat) return <SeatPicker secret={secret} names={room.names} />
 
   const current = await getCurrentEdition(room.id)
+  const progress = current ? await getProgress(current.id) : null
+  // the "Ngobrol" tab appears once you're done reading (or the stamps are open)
+  const talkUnlocked = Boolean(
+    current && (current.revealedAt || progress?.[seat].doneAt)
+  )
 
   return (
     <RoomProvider
@@ -25,14 +42,10 @@ export default async function RoomLayout({
       seat={seat}
       names={room.names}
       currentEdition={current?.number ?? null}
+      talkUnlocked={talkUnlocked}
     >
       {/* one screen-tall frame: pages scroll inside it, the reader manages its own scrolling */}
-      <div className="flex h-dvh flex-col">
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          {children}
-        </div>
-        <BottomTabs />
-      </div>
+      <RoomShell>{children}</RoomShell>
     </RoomProvider>
   )
 }

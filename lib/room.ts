@@ -349,12 +349,24 @@ export async function getArticleHtml(edition: Edition): Promise<string> {
   return data.article_html ?? ""
 }
 
+const SIGNED_URL_SECONDS = 60 * 60 * 6
+/** Reused signed URLs: the same URL lets the browser cache the PDF, and skips a storage call. */
+const signedUrls = new Map<string, { url: string; expires: number }>()
+
 export async function getPdfUrl(edition: Edition): Promise<string> {
   if (!edition.pdfPath) return ""
+  const cached = signedUrls.get(edition.pdfPath)
+  // hand out a URL only while it still has over an hour to live
+  if (cached && cached.expires - Date.now() > 60 * 60 * 1000) return cached.url
   const { data, error } = await admin()
     .storage.from(PDF_BUCKET)
-    .createSignedUrl(edition.pdfPath, 60 * 60 * 6)
+    .createSignedUrl(edition.pdfPath, SIGNED_URL_SECONDS)
   if (error) throw error
+  if (signedUrls.size > 200) signedUrls.clear()
+  signedUrls.set(edition.pdfPath, {
+    url: data.signedUrl,
+    expires: Date.now() + SIGNED_URL_SECONDS * 1000,
+  })
   return data.signedUrl
 }
 

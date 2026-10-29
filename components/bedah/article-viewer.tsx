@@ -27,8 +27,10 @@ type Props = {
   title: string
   source: string | null
   sourceUrl: string | null
-  /** 1, 1.5, 2: shown as larger text */
+  /** 1 and up: shown as larger text */
   zoom: number
+  /** Pinching with two fingers asks for a new zoom. */
+  onZoomChange?: (zoom: number) => void
   marks: Mark[]
   initialPage: number
   partner: { seat: Seat; name: string; page: number | null } | null
@@ -52,7 +54,9 @@ export type ArticleViewerHandle = PdfViewerHandle & {
   getTextAround: (range: TextRange, chars: number) => string
 }
 
-const FONT_SCALE: Record<number, number> = { 1: 1, 1.5: 1.2, 2: 1.4 }
+/** 1× → 1, 1.5× → 1.2, 2× → 1.4, … */
+const fontScale = (zoom: number) => 1 + (zoom - 1) * 0.4
+const MAX_ARTICLE_ZOOM = 3
 
 /* ---------- text <-> offsets (stamp tags are skipped, they aren't article text) ---------- */
 
@@ -146,6 +150,7 @@ export const ArticleViewer = React.forwardRef<ArticleViewerHandle, Props>(
       source,
       sourceUrl,
       zoom,
+      onZoomChange,
       marks,
       initialPage,
       partner,
@@ -161,6 +166,76 @@ export const ArticleViewer = React.forwardRef<ArticleViewerHandle, Props>(
   ) {
     const areaRef = React.useRef<HTMLDivElement>(null)
     const contentRef = React.useRef<HTMLDivElement>(null)
+    const articleRef = React.useRef<HTMLElement>(null)
+
+    // pinch with two fingers: preview with CSS scale, then set the new text size
+    // and keep the same place in the article
+    const zoomRef = React.useRef(zoom)
+    const zoomChange = React.useRef(onZoomChange)
+    React.useEffect(() => {
+      zoomRef.current = zoom
+      zoomChange.current = onZoomChange
+    })
+    const keepRatio = React.useRef<number | null>(null)
+    React.useEffect(() => {
+      const area = areaRef.current
+      const article = articleRef.current
+      if (!area || !article) return
+      let start: { dist: number; zoom: number } | null = null
+      let next = 1
+      const distance = (t: TouchList) =>
+        Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+      function onStart(event: TouchEvent) {
+        if (event.touches.length !== 2 || !zoomChange.current) return
+        const box = article!.getBoundingClientRect()
+        const cx = (event.touches[0].clientX + event.touches[1].clientX) / 2
+        const cy = (event.touches[0].clientY + event.touches[1].clientY) / 2
+        start = { dist: distance(event.touches), zoom: zoomRef.current }
+        next = start.zoom
+        article!.style.transformOrigin = `${cx - box.left}px ${cy - box.top}px`
+      }
+      function onMove(event: TouchEvent) {
+        if (!start || event.touches.length !== 2) return
+        event.preventDefault()
+        next = Math.min(
+          MAX_ARTICLE_ZOOM,
+          Math.max(1, (start.zoom * distance(event.touches)) / start.dist)
+        )
+        article!.style.transform = `scale(${fontScale(next) / fontScale(start.zoom)})`
+      }
+      function onEnd(event: TouchEvent) {
+        if (!start || event.touches.length >= 2) return
+        const done = start
+        start = null
+        article!.style.transform = ""
+        article!.style.transformOrigin = ""
+        const rounded = Math.round(next * 20) / 20
+        if (Math.abs(rounded - done.zoom) < 0.05) return
+        const max = area!.scrollHeight - area!.clientHeight
+        keepRatio.current = max > 0 ? area!.scrollTop / max : 0
+        zoomChange.current?.(rounded)
+      }
+      const stopGesture = (event: Event) => event.preventDefault()
+      area.addEventListener("touchstart", onStart, { passive: true })
+      area.addEventListener("touchmove", onMove, { passive: false })
+      area.addEventListener("touchend", onEnd)
+      area.addEventListener("touchcancel", onEnd)
+      area.addEventListener("gesturestart", stopGesture)
+      return () => {
+        area.removeEventListener("touchstart", onStart)
+        area.removeEventListener("touchmove", onMove)
+        area.removeEventListener("touchend", onEnd)
+        area.removeEventListener("touchcancel", onEnd)
+        area.removeEventListener("gesturestart", stopGesture)
+      }
+    }, [])
+    React.useLayoutEffect(() => {
+      const ratio = keepRatio.current
+      const area = areaRef.current
+      if (ratio == null || !area) return
+      keepRatio.current = null
+      area.scrollTop = ratio * (area.scrollHeight - area.clientHeight)
+    }, [zoom])
 
     // the article HTML is set once; React never re-renders inside it, so we can decorate it
     const body = React.useMemo(() => ({ __html: html }), [html])
@@ -421,15 +496,16 @@ export const ArticleViewer = React.forwardRef<ArticleViewerHandle, Props>(
       }
     }, [])
 
-    const scale = FONT_SCALE[zoom] ?? 1
+    const scale = fontScale(zoom)
 
     return (
       <div
         ref={areaRef}
         data-slot="reader-scroll"
-        className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain"
+        className="relative min-h-0 min-w-0 flex-1 touch-pan-x touch-pan-y overflow-y-auto overscroll-contain pb-(--nav-space)"
       >
         <article
+          ref={articleRef}
           className="relative mx-auto w-full px-5 py-8 sm:px-8"
           style={{ maxWidth: `${Math.round(680 * scale)}px` }}
         >

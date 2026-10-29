@@ -178,7 +178,7 @@ export function ChatPanel({
 
       <form
         onSubmit={submit}
-        className="flex shrink-0 items-end gap-2 border-t border-rail p-2"
+        className="flex shrink-0 items-end gap-2 border-t border-rail p-2 pb-[calc(var(--nav-space,0px)+0.5rem)]"
       >
         <Textarea
           ref={inputRef}

@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation"
+import { notFound, redirect } from "next/navigation"
 
 import { ReadingRoom } from "@/components/bedah/reading-room"
 import { aiEnabled } from "@/lib/ai"
@@ -26,7 +26,8 @@ export default async function ReadingPage({
   if (!seat) notFound()
 
   const edition = await getEditionByNumber(room.id, Number(no))
-  if (!edition) notFound()
+  // e.g. it was just swapped for another reading
+  if (!edition) redirect(`/r/${secret}`)
 
   const [
     pdfUrl,

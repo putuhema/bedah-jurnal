@@ -204,7 +204,11 @@ export async function importFromUrl(
       const path = `${room.id}/${randomUUID()}.pdf`
       const { error: uploadError } = await admin()
         .storage.from(PDF_BUCKET)
-        .upload(path, imported.bytes, { contentType: "application/pdf" })
+        .upload(path, imported.bytes, {
+          contentType: "application/pdf",
+          // files never change (each gets a new path), so phones may keep them
+          cacheControl: "86400",
+        })
       if (uploadError) throw new Error("Gagal menyimpan PDF.")
       const fallbackTitle =
         decodeURIComponent(
@@ -571,6 +575,28 @@ export async function archiveEdition(secret: string, editionId: string) {
       })
       .eq("id", edition.id)
     if (error) throw new Error("Gagal menyimpan ke arsip.")
+    refresh(secret)
+    return null
+  })
+}
+
+/** Drops the current edition (stamps, notes and chat go with it) so you can pick another one. */
+export async function cancelEdition(secret: string, editionId: string) {
+  return run(async () => {
+    const { room } = await requireRoomSeat(secret)
+    const edition = await getEditionById(room.id, editionId)
+    if (!edition) throw new Error("Edisi tidak ditemukan.")
+    if (edition.archivedAt) throw new Error("Edisi lama nggak bisa dihapus.")
+    const { error } = await admin()
+      .from("editions")
+      .delete()
+      .eq("id", edition.id)
+      .eq("room_id", room.id)
+    if (error) throw new Error("Gagal menghapus edisi.")
+    if (edition.pdfPath) {
+      // best effort: a leftover file is harmless
+      await admin().storage.from(PDF_BUCKET).remove([edition.pdfPath])
+    }
     refresh(secret)
     return null
   })

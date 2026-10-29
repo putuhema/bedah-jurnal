@@ -3,10 +3,15 @@
 import * as React from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { AnimatePresence, motion } from "motion/react"
 import {
   ArrowLeftIcon,
   CheckIcon,
+  HandIcon,
+  HourglassIcon,
+  LockOpenIcon,
   MessageCircleIcon,
+  MessagesSquareIcon,
   SparklesIcon,
   Trash2Icon,
   ZoomInIcon,
@@ -28,7 +33,10 @@ import {
   type ArticleViewerHandle,
 } from "@/components/bedah/article-viewer"
 import { ChatPanel } from "@/components/bedah/chat-panel"
+import { glass } from "@/components/bedah/floating-nav"
 import {
+  formatZoom,
+  nextZoomLevel,
   PdfViewer,
   type PdfViewerHandle,
   type TextSelection,
@@ -49,6 +57,7 @@ import { Kbd } from "@/components/ui/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { useHotkey } from "@/hooks/use-hotkey"
+import { useNavCollapsed } from "@/hooks/use-nav-collapsed"
 import { seatText } from "@/lib/seat-style"
 import {
   REACTIONS,
@@ -136,8 +145,7 @@ export function ReadingRoom({
   })
 
   function cycleZoom() {
-    const levels = [1, 1.5, 2]
-    setZoom((z) => levels[(levels.indexOf(z) + 1) % levels.length])
+    setZoom(nextZoomLevel)
     // stay on the same page once the new size has rendered
     const keep = pageRef.current
     requestAnimationFrame(() =>
@@ -145,6 +153,8 @@ export function ReadingRoom({
     )
   }
 
+  const [navCollapsed] = useNavCollapsed()
+  const [confirmDone, setConfirmDone] = React.useState(false)
   const revealed = Boolean(edition.revealedAt)
   const meDone = Boolean(progress[seat].doneAt)
   const otherDone = Boolean(progress[other].doneAt)
@@ -514,6 +524,7 @@ export function ReadingRoom({
     setBusy("done")
     const result = await markDone(secret, edition.id)
     setBusy(null)
+    setConfirmDone(false)
     if (!result.ok) return toast.add({ title: result.error, type: "error" })
     send("done", { from: seat, edition: edition.number })
     notifyChanged()
@@ -537,7 +548,7 @@ export function ReadingRoom({
   useHotkey("z", cycleZoom)
   useHotkey("c", () => toggleChat())
   useHotkey("j", comeHere, !revealed)
-  useHotkey("d", () => void finish(), !meDone)
+  useHotkey("d", () => setConfirmDone(true), !meDone)
   useHotkey("b", () => setRevealOpen(true), bothDone && !revealed)
   useHotkey("n", () => router.push(talkHref), revealed)
 
@@ -705,7 +716,7 @@ export function ReadingRoom({
           aria-label="Perbesar halaman"
         >
           <ZoomInIcon data-icon="inline-start" />
-          {zoom}×
+          {formatZoom(zoom)}
         </Button>
         <Button
           variant={chatOpen ? "secondary" : "ghost"}
@@ -747,6 +758,7 @@ export function ReadingRoom({
             source={edition.source}
             sourceUrl={edition.sourceUrl}
             zoom={zoom}
+            onZoomChange={setZoom}
             marks={marks}
             initialPage={initialPage}
             partner={
@@ -772,6 +784,7 @@ export function ReadingRoom({
             url={pdfUrl}
             pageCount={edition.pageCount}
             zoom={zoom}
+            onZoomChange={setZoom}
             marks={marks}
             initialPage={initialPage}
             partner={
@@ -803,40 +816,96 @@ export function ReadingRoom({
         )}
       </div>
 
-      <div className="z-20 flex shrink-0 gap-2 border-t border-rail bg-card px-4 py-2.5">
-        {!revealed && (
-          <Button variant="outline" className="flex-1" onClick={comeHere}>
-            Sini dong <Kbd>J</Kbd>
-          </Button>
+      {/* floating actions, just above the bottom nav (lower when it's folded away) */}
+      <div
+        className={cn(
+          "pointer-events-none fixed right-3 z-30 flex flex-col items-end gap-2.5 transition-[bottom,opacity,visibility] duration-300 ease-out",
+          navCollapsed
+            ? "bottom-[calc(env(safe-area-inset-bottom)+14px)]"
+            : "bottom-[calc(var(--nav-space)+6px)]",
+          // on phones the chat covers this side; get out of its way
+          // (invisible, not just transparent: the buttons inside must stop taking taps)
+          chatOpen && "max-lg:invisible max-lg:opacity-0"
         )}
-        {revealed ? (
-          <Button
-            className="flex-1"
-            render={<Link href={talkHref} />}
-            nativeButton={false}
-          >
-            Ngobrol <Kbd>N</Kbd>
-          </Button>
-        ) : bothDone ? (
-          <Button className="flex-1" onClick={() => setRevealOpen(true)}>
-            Buka bareng <Kbd>B</Kbd>
-          </Button>
-        ) : meDone ? (
-          <Button variant="outline" className="flex-1" disabled>
-            <CheckIcon data-icon="inline-start" />
-            Nunggu {names[other]}
-          </Button>
-        ) : (
-          <Button
-            className="flex-1"
-            onClick={finish}
-            disabled={busy === "done"}
-          >
-            {busy === "done" && <Spinner data-icon="inline-start" />}
-            Aku selesai <Kbd>D</Kbd>
-          </Button>
-        )}
+      >
+        <AnimatePresence initial={false} mode="popLayout">
+          {!revealed && (
+            <Fab
+              key="come"
+              label="Sini dong"
+              hint="J"
+              onClick={comeHere}
+              className={cn(glass, "text-foreground")}
+            >
+              <HandIcon />
+            </Fab>
+          )}
+          {revealed ? (
+            <Fab
+              key="talk"
+              label="Ngobrol"
+              hint="N"
+              href={talkHref}
+              wide
+              className="bg-primary text-primary-foreground shadow-[0_10px_30px_rgb(19_72_220/0.35)]"
+            >
+              <MessagesSquareIcon />
+            </Fab>
+          ) : bothDone ? (
+            <Fab
+              key="reveal"
+              label="Buka bareng"
+              hint="B"
+              onClick={() => setRevealOpen(true)}
+              wide
+              className="bg-primary text-primary-foreground shadow-[0_10px_30px_rgb(19_72_220/0.35)]"
+            >
+              <LockOpenIcon />
+            </Fab>
+          ) : meDone ? (
+            <Fab
+              key="waiting"
+              label={`Nunggu ${names[other]}`}
+              wide
+              disabled
+              className={cn(glass, "text-muted-foreground")}
+            >
+              <HourglassIcon />
+            </Fab>
+          ) : (
+            <Fab
+              key="done"
+              label="Aku selesai"
+              hint="D"
+              onClick={() => setConfirmDone(true)}
+              className="size-14 bg-primary text-primary-foreground shadow-[0_10px_30px_rgb(19_72_220/0.35)] [&_svg]:size-6"
+            >
+              <CheckIcon />
+            </Fab>
+          )}
+        </AnimatePresence>
       </div>
+
+      <Dialog open={confirmDone} onOpenChange={setConfirmDone}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Udah selesai baca?</DialogTitle>
+            <DialogDescription>
+              Kamu nggak bisa kasih cap lagi setelah ini. Cap kalian dibuka
+              begitu {names[other]} juga selesai.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              Belum
+            </DialogClose>
+            <Button onClick={finish} disabled={busy === "done"}>
+              {busy === "done" && <Spinner data-icon="inline-start" />}
+              Ya, aku selesai
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* closes by itself on both phones once the stamps are revealed */}
       <Dialog open={revealOpen && !revealed} onOpenChange={setRevealOpen}>
@@ -931,6 +1000,71 @@ export function ReadingRoom({
 
 function noopSubscribe() {
   return () => {}
+}
+
+/** A round floating button (a pill with its label when `wide`). */
+function Fab({
+  label,
+  hint,
+  onClick,
+  href,
+  wide,
+  disabled,
+  className,
+  children,
+  ref,
+}: {
+  label: string
+  hint?: string
+  onClick?: () => void
+  href?: string
+  wide?: boolean
+  disabled?: boolean
+  className?: string
+  children: React.ReactNode
+  ref?: React.Ref<HTMLElement>
+}) {
+  const classes = cn(
+    "pointer-events-auto flex h-12 items-center justify-center gap-2 rounded-full text-sm [&_svg]:size-5 [&_svg]:shrink-0",
+    wide ? "px-5" : "w-12",
+    className
+  )
+  const title = hint ? `${label} (${hint})` : label
+  const content = (
+    <>
+      {children}
+      {wide && <span>{label}</span>}
+    </>
+  )
+  return (
+    <motion.div
+      ref={ref as React.Ref<HTMLDivElement>}
+      layout
+      initial={{ opacity: 0, scale: 0.6 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.6 }}
+      whileTap={disabled ? undefined : { scale: 0.9 }}
+      transition={{ type: "spring", stiffness: 520, damping: 34 }}
+      className="pointer-events-auto"
+    >
+      {href ? (
+        <Link href={href} aria-label={label} title={title} className={classes}>
+          {content}
+        </Link>
+      ) : (
+        <button
+          type="button"
+          aria-label={label}
+          title={title}
+          onClick={onClick}
+          disabled={disabled}
+          className={classes}
+        >
+          {content}
+        </button>
+      )}
+    </motion.div>
+  )
 }
 
 /**

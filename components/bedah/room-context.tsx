@@ -36,6 +36,8 @@ type RoomContextValue = {
   other: Seat
   names: Record<Seat, string>
   currentEdition: number | null
+  /** You finished reading the current edition (or it's revealed): talk time is open. */
+  talkUnlocked: boolean
   /** The other person, if they are online right now. */
   otherPresence: PresenceInfo | null
   setLocation: (
@@ -64,6 +66,7 @@ export function RoomProvider({
   seat,
   names,
   currentEdition,
+  talkUnlocked,
   children,
 }: {
   roomId: string
@@ -71,6 +74,7 @@ export function RoomProvider({
   seat: Seat
   names: Record<Seat, string>
   currentEdition: number | null
+  talkUnlocked: boolean
   children: React.ReactNode
 }) {
   const router = useRouter()
@@ -98,6 +102,14 @@ export function RoomProvider({
     refreshTimer.current = setTimeout(() => router.refresh(), 120)
   }, [router])
 
+  // read through refs so a refresh (new `names` object) doesn't rebuild the channel
+  const namesRef = React.useRef(names)
+  const routerRef = React.useRef(router)
+  React.useEffect(() => {
+    namesRef.current = names
+    routerRef.current = router
+  })
+
   React.useEffect(() => {
     let channel: RealtimeChannel
     try {
@@ -110,10 +122,23 @@ export function RoomProvider({
     }
     channelRef.current = channel
 
+    // toast when the other person shows up; a quick reconnect (phone locked for a
+    // moment, flaky signal) doesn't count as arriving again
+    let wasOnline = false
+    let leftAt = 0
     channel
       .on("presence", { event: "sync" }, () => {
         const state = channel.presenceState<PresenceInfo>()
         const latest = state[other]?.at(-1)
+        const online = Boolean(latest)
+        if (online && !wasOnline && Date.now() - leftAt > 30_000) {
+          toast.add({
+            title: `${namesRef.current[other]} lagi di sini`,
+            description: "Dia juga lagi buka Bedah Jurnal.",
+          })
+        }
+        if (!online && wasOnline) leftAt = Date.now()
+        wasOnline = online
         setOtherPresence(
           latest
             ? {
@@ -132,12 +157,14 @@ export function RoomProvider({
           comeHandlers.current.forEach((handler) => handler(msg))
         } else {
           toast.add({
-            title: `${names[msg.from]} manggil kamu`,
+            title: `${namesRef.current[msg.from]} manggil kamu`,
             description: `Edisi ${msg.edition}, hal ${msg.page}`,
             actionProps: {
               children: "Ke sana",
               onClick: () =>
-                router.push(`/r/${secret}/e/${msg.edition}?hal=${msg.page}`),
+                routerRef.current.push(
+                  `/r/${secret}/e/${msg.edition}?hal=${msg.page}`
+                ),
             },
           })
         }
@@ -148,19 +175,21 @@ export function RoomProvider({
           chatHandlers.current.forEach((handler) => handler(msg))
         } else {
           toast.add({
-            title: `${names[msg.message.seat]}: ${msg.message.body.slice(0, 80)}`,
+            title: `${namesRef.current[msg.message.seat]}: ${msg.message.body.slice(0, 80)}`,
             description: `Obrolan edisi ${msg.edition}`,
             actionProps: {
               children: "Buka",
               onClick: () =>
-                router.push(`/r/${secret}/e/${msg.edition}?obrolan=1`),
+                routerRef.current.push(
+                  `/r/${secret}/e/${msg.edition}?obrolan=1`
+                ),
             },
           })
         }
       })
       .on("broadcast", { event: "done" }, ({ payload }) => {
         const msg = payload as Events["done"]
-        const title = `${names[msg.from]} selesai baca`
+        const title = `${namesRef.current[msg.from]} selesai baca`
         toast.add({
           title,
           description: `Edisi ${msg.edition}. Cap dibuka kalau kamu juga selesai.`,
@@ -184,7 +213,7 @@ export function RoomProvider({
       channelRef.current = null
       void channel.unsubscribe()
     }
-  }, [roomId, seat, other, names, secret, router, refreshSoon])
+  }, [roomId, seat, other, secret, refreshSoon])
 
   const setLocation = React.useCallback(
     (
@@ -232,6 +261,7 @@ export function RoomProvider({
       other,
       names,
       currentEdition,
+      talkUnlocked,
       otherPresence,
       setLocation,
       send,
@@ -246,6 +276,7 @@ export function RoomProvider({
       other,
       names,
       currentEdition,
+      talkUnlocked,
       otherPresence,
       setLocation,
       send,

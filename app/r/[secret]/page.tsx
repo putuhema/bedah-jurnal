@@ -4,7 +4,11 @@ import Link from "next/link"
 import { AddEditionDialog } from "@/components/bedah/add-edition-dialog"
 import { Cover, Logo, Presence, TopBar } from "@/components/bedah/bits"
 import { seatBg, seatText } from "@/lib/seat-style"
-import { PrimaryLink, RoomFooter } from "@/components/bedah/shelf-client"
+import {
+  ChangeEditionButton,
+  PrimaryLink,
+  RoomFooter,
+} from "@/components/bedah/shelf-client"
 import {
   Empty,
   EmptyContent,
@@ -31,8 +35,12 @@ const dateFormat = new Intl.DateTimeFormat("id-ID", {
   month: "short",
 })
 
-export default async function ShelfPage({ params }: PageProps<"/r/[secret]">) {
+export default async function ShelfPage({
+  params,
+  searchParams,
+}: PageProps<"/r/[secret]">) {
   const { secret } = await params
+  const { tambah } = await searchParams
   const room = await getRoom(secret)
   if (!room) notFound()
   const seat = await getSeat(room)
@@ -151,6 +159,14 @@ export default async function ShelfPage({ params }: PageProps<"/r/[secret]">) {
                 />
               )}
             </div>
+            {!current.revealedAt && (
+              <div className="flex justify-center">
+                <ChangeEditionButton
+                  editionId={current.id}
+                  number={current.number}
+                />
+              </div>
+            )}
           </section>
         ) : (
           <Empty className="px-4 py-12">
@@ -169,7 +185,10 @@ export default async function ShelfPage({ params }: PageProps<"/r/[secret]">) {
               </EmptyDescription>
             </EmptyHeader>
             <EmptyContent>
-              <AddEditionDialog nextNumber={nextNumber} />
+              <AddEditionDialog
+                nextNumber={nextNumber}
+                defaultOpen={tambah === "1"}
+              />
             </EmptyContent>
           </Empty>
         )}

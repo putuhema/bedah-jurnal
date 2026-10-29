@@ -298,10 +298,12 @@ try {
 
   console.log("7. Both finish, then reveal together")
   await a.getByRole("button", { name: /Aku selesai/ }).click()
+  await a.getByRole("button", { name: "Ya, aku selesai" }).click()
   await b.getByText("Putu selesai baca").waitFor({ timeout: 10000 })
   check(true, "S was pinged that Putu finished")
   await a.getByRole("button", { name: /Nunggu S/ }).waitFor()
   await b.getByRole("button", { name: /Aku selesai/ }).click()
+  await b.getByRole("button", { name: "Ya, aku selesai" }).click()
   await b.getByText("Kalian berdua selesai.").waitFor({ timeout: 10000 })
   await a.getByText("Kalian berdua selesai.").waitFor({ timeout: 10000 })
   check(true, "reveal dialog opened on both phones")
