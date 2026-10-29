@@ -502,7 +502,7 @@ export const ArticleViewer = React.forwardRef<ArticleViewerHandle, Props>(
       <div
         ref={areaRef}
         data-slot="reader-scroll"
-        className="relative min-h-0 min-w-0 flex-1 touch-pan-x touch-pan-y overflow-y-auto overscroll-contain pb-(--nav-space)"
+        className="relative min-h-0 min-w-0 flex-1 touch-pan-x touch-pan-y overflow-y-auto overscroll-contain pt-(--top-space) pb-(--nav-space)"
       >
         <article
           ref={articleRef}

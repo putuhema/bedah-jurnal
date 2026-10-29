@@ -13,14 +13,13 @@ import {
 import {
   BookAIcon,
   BookOpenTextIcon,
-  ChevronDownIcon,
   LibraryBigIcon,
   MessagesSquareIcon,
   type LucideIcon,
 } from "lucide-react"
 
 import { useRoom } from "@/components/bedah/room-context"
-import { useNavCollapsed } from "@/hooks/use-nav-collapsed"
+import { useReadingMode } from "@/hooks/use-reading-mode"
 import { cn } from "@/lib/utils"
 
 type TabId = "rak" | "ruang" | "ngobrol" | "kamus"
@@ -28,7 +27,7 @@ type Tab = { id: TabId; label: string; href: string | null; icon: LucideIcon }
 
 const spring: Transition = { type: "spring", stiffness: 520, damping: 40 }
 
-/** Frosted glass, shared by the nav and the reader's floating buttons. */
+/** Frosted glass, shared by the header, the nav and the reader's floating buttons. */
 export const glass =
   "border border-white/70 bg-white/60 shadow-[0_10px_30px_rgb(0_0_0/0.12),inset_0_1px_0_rgb(255_255_255/0.8)] backdrop-blur-xl backdrop-saturate-150"
 
@@ -39,14 +38,11 @@ export function activeTab(pathname: string): TabId {
   return "rak"
 }
 
-/**
- * The floating bottom nav. The chevron folds it into one small button in the
- * corner so the page gets more room; tapping that button opens it again.
- */
+/** The floating bottom nav. It slides away in reading mode. */
 export function FloatingNav() {
   const { secret, currentEdition, talkUnlocked } = useRoom()
   const pathname = usePathname()
-  const [collapsed, setCollapsed] = useNavCollapsed()
+  const reading = useReadingMode()
   const base = `/r/${secret}`
   const active = activeTab(pathname)
 
@@ -71,15 +67,15 @@ export function FloatingNav() {
       : []),
     { id: "kamus", label: "Kamus", href: `${base}/kamus`, icon: BookAIcon },
   ]
-  const ActiveIcon = tabs.find((t) => t.id === active)?.icon ?? LibraryBigIcon
 
   return (
     <MotionConfig reducedMotion="user" transition={spring}>
-      <div
-        className={cn(
-          "pointer-events-none fixed inset-x-0 bottom-0 z-40 flex px-3 pb-[calc(env(safe-area-inset-bottom)+12px)]",
-          collapsed ? "justify-start" : "justify-center"
-        )}
+      <motion.div
+        initial={false}
+        animate={reading ? { y: 120, opacity: 0 } : { y: 0, opacity: 1 }}
+        // slid off-screen in reading mode; inert so it can't be tabbed to
+        inert={reading}
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-3 pb-[calc(env(safe-area-inset-bottom)+12px)]"
       >
         <LayoutGroup>
           <motion.nav
@@ -88,54 +84,14 @@ export function FloatingNav() {
             style={{ borderRadius: 999 }}
             className={cn("pointer-events-auto flex items-center p-1", glass)}
           >
-            <AnimatePresence mode="popLayout" initial={false}>
-              {collapsed ? (
-                <motion.button
-                  key="open"
-                  type="button"
-                  onClick={() => setCollapsed(false)}
-                  aria-label="Buka navigasi"
-                  initial={{ opacity: 0, scale: 0.6 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.6 }}
-                  whileTap={{ scale: 0.9 }}
-                  className="grid size-11 place-items-center rounded-full text-foreground"
-                >
-                  <ActiveIcon className="size-5" />
-                </motion.button>
-              ) : (
-                <motion.div
-                  key="tabs"
-                  className="flex items-center"
-                  initial={{ opacity: 0, filter: "blur(4px)" }}
-                  animate={{ opacity: 1, filter: "blur(0px)" }}
-                  exit={{ opacity: 0, filter: "blur(4px)" }}
-                >
-                  <AnimatePresence initial={false}>
-                    {tabs.map((tab) => (
-                      <NavItem
-                        key={tab.id}
-                        tab={tab}
-                        active={active === tab.id}
-                      />
-                    ))}
-                  </AnimatePresence>
-                  <motion.button
-                    layout="position"
-                    type="button"
-                    onClick={() => setCollapsed(true)}
-                    aria-label="Lipat navigasi"
-                    whileTap={{ scale: 0.85 }}
-                    className="ml-0.5 grid size-9 place-items-center rounded-full text-muted-foreground hover:text-foreground"
-                  >
-                    <ChevronDownIcon className="size-4" />
-                  </motion.button>
-                </motion.div>
-              )}
+            <AnimatePresence initial={false}>
+              {tabs.map((tab) => (
+                <NavItem key={tab.id} tab={tab} active={active === tab.id} />
+              ))}
             </AnimatePresence>
           </motion.nav>
         </LayoutGroup>
-      </div>
+      </motion.div>
     </MotionConfig>
   )
 }
@@ -155,7 +111,7 @@ function NavItem({ tab, active }: { tab: Tab; active: boolean }) {
     </>
   )
   const className = cn(
-    "relative flex h-12 w-[66px] flex-col items-center justify-center gap-1 rounded-full transition-colors",
+    "relative flex h-12 w-[68px] flex-col items-center justify-center gap-1 rounded-full transition-colors",
     active ? "text-foreground" : "text-muted-foreground",
     !tab.href && "opacity-40"
   )
@@ -187,10 +143,13 @@ function NavItem({ tab, active }: { tab: Tab; active: boolean }) {
   )
 }
 
-/** Puts the nav's height in `--nav-space`, so pages can keep their last bit clear of it. */
+/**
+ * The room frame. The header and nav float over the page; `--top-space` and
+ * `--nav-space` say how much room they take, so content can start and end clear of them.
+ */
 export function RoomShell({ children }: { children: React.ReactNode }) {
-  const [collapsed] = useNavCollapsed()
   const pathname = usePathname()
+  const reading = useReadingMode()
   // the reader scrolls inside its own area and pads itself
   const ownScroll = activeTab(pathname) === "ruang"
   return (
@@ -198,11 +157,13 @@ export function RoomShell({ children }: { children: React.ReactNode }) {
       className="flex h-dvh flex-col"
       style={
         {
-          "--nav-space": `calc(env(safe-area-inset-bottom) + ${collapsed ? 68 : 76}px)`,
+          "--top-space": `calc(env(safe-area-inset-top) + ${reading ? 56 : 68}px)`,
+          "--nav-space": `calc(env(safe-area-inset-bottom) + ${reading ? 12 : 76}px)`,
         } as React.CSSProperties
       }
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {!ownScroll && <div aria-hidden className="h-(--top-space) shrink-0" />}
         {children}
         {!ownScroll && <div aria-hidden className="h-(--nav-space) shrink-0" />}
       </div>

@@ -87,7 +87,7 @@ export function ChatPanel({
   return (
     <aside
       aria-label="Obrolan"
-      className="absolute inset-y-0 right-0 z-30 flex w-[min(360px,92%)] flex-col border-l border-rail bg-card shadow-[-8px_0_24px_rgb(0_0_0/0.06)] lg:static lg:w-80 lg:shadow-none"
+      className="absolute inset-y-0 right-0 z-30 flex w-[min(360px,92%)] flex-col border-l border-rail bg-card pt-(--top-space) shadow-[-8px_0_24px_rgb(0_0_0/0.06)] lg:static lg:w-80 lg:shadow-none"
     >
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-rail px-3">
         <MessageCircleIcon className="size-4 text-muted-foreground" />

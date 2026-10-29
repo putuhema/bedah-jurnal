@@ -119,7 +119,13 @@ export function TalkTime({
       : "Kita belajar hari ini"
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      // the room frame already keeps clear of the header and nav here
+      style={
+        { "--top-space": "0px", "--nav-space": "0px" } as React.CSSProperties
+      }
+    >
       <TopBar>
         <span className="text-xs whitespace-nowrap text-muted-foreground">
           <span className="hidden sm:inline">waktunya </span>ngobrol · edisi{" "}

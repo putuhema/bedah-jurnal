@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { AnimatePresence, motion } from "motion/react"
 import {
   ArrowLeftIcon,
+  BookOpenIcon,
   CheckIcon,
   HandIcon,
   HourglassIcon,
@@ -14,6 +15,7 @@ import {
   MessagesSquareIcon,
   SparklesIcon,
   Trash2Icon,
+  XIcon,
   ZoomInIcon,
 } from "lucide-react"
 
@@ -57,7 +59,7 @@ import { Kbd } from "@/components/ui/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { useHotkey } from "@/hooks/use-hotkey"
-import { useNavCollapsed } from "@/hooks/use-nav-collapsed"
+import { setReadingMode, useReadingMode } from "@/hooks/use-reading-mode"
 import { seatText } from "@/lib/seat-style"
 import {
   REACTIONS,
@@ -153,7 +155,25 @@ export function ReadingRoom({
     )
   }
 
-  const [navCollapsed] = useNavCollapsed()
+  const reading = useReadingMode()
+  // leaving the reader always leaves reading mode
+  React.useEffect(() => () => setReadingMode(false), [])
+
+  function enterReading() {
+    setChatOpen(false)
+    setReadingMode(true)
+    // let the header and nav slide away first, then fit the text to the screen
+    setTimeout(() => void viewer.current?.fitToText?.(), 50)
+  }
+
+  function exitReading() {
+    setReadingMode(false)
+    setZoom(1)
+    const keep = pageRef.current
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => viewer.current?.scrollToPage(keep, "instant"))
+    )
+  }
   const [confirmDone, setConfirmDone] = React.useState(false)
   const revealed = Boolean(edition.revealedAt)
   const meDone = Boolean(progress[seat].doneAt)
@@ -546,6 +566,8 @@ export function ReadingRoom({
   }
 
   useHotkey("z", cycleZoom)
+  useHotkey("r", () => (reading ? exitReading() : enterReading()))
+  useHotkey("escape", exitReading, reading && !floating)
   useHotkey("c", () => toggleChat())
   useHotkey("j", comeHere, !revealed)
   useHotkey("d", () => setConfirmDone(true), !meDone)
@@ -695,23 +717,24 @@ export function ReadingRoom({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <TopBar>
+      <TopBar hidden={reading}>
         <Button
           variant="ghost"
           size="icon-sm"
+          className="rounded-full"
           render={<Link href={`/r/${secret}`} aria-label="Kembali ke rak" />}
           nativeButton={false}
         >
           <ArrowLeftIcon />
         </Button>
         <span className="text-xs whitespace-nowrap text-muted-foreground">
-          <span className="hidden sm:inline">edisi {edition.number} · </span>
           {positionLabel(edition, page)}
         </span>
         <span className="flex-1" />
         <Button
           variant="ghost"
           size="sm"
+          className="rounded-full px-2"
           onClick={cycleZoom}
           aria-label="Perbesar halaman"
         >
@@ -719,12 +742,22 @@ export function ReadingRoom({
           {formatZoom(zoom)}
         </Button>
         <Button
+          variant="ghost"
+          size="icon-sm"
+          className="rounded-full"
+          onClick={enterReading}
+          aria-label="Mode baca"
+          title="Mode baca (R)"
+        >
+          <BookOpenIcon />
+        </Button>
+        <Button
           variant={chatOpen ? "secondary" : "ghost"}
           size="sm"
           onClick={() => toggleChat()}
           aria-label="Obrolan"
           aria-pressed={chatOpen}
-          className="relative"
+          className="relative rounded-full"
         >
           <MessageCircleIcon />
           {unread > 0 && (
@@ -735,19 +768,6 @@ export function ReadingRoom({
         </Button>
         <Presence />
       </TopBar>
-
-      <div className="border-b border-rail px-4 py-2 text-xs text-muted-foreground">
-        {revealed ? (
-          <>
-            cap terbuka · <span className={seatText[seat]}>{names[seat]}</span>{" "}
-            &amp; <span className={seatText[other]}>{names[other]}</span>
-          </>
-        ) : otherCount > 0 ? (
-          `${otherCount} cap ${names[other]} tersembunyi sampai kalian berdua selesai`
-        ) : (
-          "pilih kalimat untuk kasih cap"
-        )}
-      </div>
 
       <div className="relative flex min-h-0 flex-1">
         {isArticle ? (
@@ -781,6 +801,7 @@ export function ReadingRoom({
           <PdfViewer
             ref={viewer}
             docKey={edition.id}
+            reading={reading}
             url={pdfUrl}
             pageCount={edition.pageCount}
             zoom={zoom}
@@ -816,15 +837,39 @@ export function ReadingRoom({
         )}
       </div>
 
-      {/* floating actions, just above the bottom nav (lower when it's folded away) */}
+      {/* reading mode: only the page number and a way out stay on screen */}
+      <AnimatePresence>
+        {reading && (
+          <motion.div
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            className={cn(
+              "fixed top-[calc(env(safe-area-inset-top)+10px)] right-3 z-30 flex h-9 items-center gap-1 rounded-full pr-1 pl-3 text-xs text-muted-foreground",
+              glass
+            )}
+          >
+            {positionLabel(edition, page)}
+            <button
+              type="button"
+              onClick={exitReading}
+              aria-label="Keluar mode baca"
+              title="Keluar mode baca (Esc)"
+              className="grid size-7 place-items-center rounded-full text-foreground hover:bg-foreground/5"
+            >
+              <XIcon className="size-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* floating actions, just above the bottom nav */}
       <div
         className={cn(
-          "pointer-events-none fixed right-3 z-30 flex flex-col items-end gap-2.5 transition-[bottom,opacity,visibility] duration-300 ease-out",
-          navCollapsed
-            ? "bottom-[calc(env(safe-area-inset-bottom)+14px)]"
-            : "bottom-[calc(var(--nav-space)+6px)]",
-          // on phones the chat covers this side; get out of its way
+          "pointer-events-none fixed right-3 bottom-[calc(var(--nav-space)+6px)] z-30 flex flex-col items-end gap-2.5 transition-[opacity,visibility] duration-300 ease-out",
+          // out of the way in reading mode, and on phones while the chat covers this side
           // (invisible, not just transparent: the buttons inside must stop taking taps)
+          reading && "invisible opacity-0",
           chatOpen && "max-lg:invisible max-lg:opacity-0"
         )}
       >

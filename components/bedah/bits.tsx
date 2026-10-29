@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils"
 
+import { glass } from "@/components/bedah/floating-nav"
 import { useRoom } from "@/components/bedah/room-context"
 import { Badge } from "@/components/ui/badge"
 import { seatBg } from "@/lib/seat-style"
@@ -41,7 +42,10 @@ export function Presence() {
   const { other, names, otherPresence } = useRoom()
   const online = Boolean(otherPresence)
   return (
-    <Badge variant="outline" className="gap-1.5 font-normal">
+    <Badge
+      variant="outline"
+      className="h-8 gap-1.5 rounded-full px-2.5 font-normal"
+    >
       <span
         className={cn(
           "size-1.5 rounded-full",
@@ -63,10 +67,34 @@ export function Presence() {
   )
 }
 
-export function TopBar({ children }: { children: React.ReactNode }) {
+/**
+ * The header: a floating glass bar, like the bottom nav. Pages scroll under it
+ * (the room frame keeps `--top-space` clear at the top).
+ */
+export function TopBar({
+  children,
+  hidden = false,
+}: {
+  children: React.ReactNode
+  /** slide it away (reading mode) */
+  hidden?: boolean
+}) {
   return (
-    <header className="sticky top-0 z-30 flex h-13 items-center gap-2 border-b border-rail bg-card px-4">
-      {children}
+    <header
+      inert={hidden}
+      className={cn(
+        "pointer-events-none fixed inset-x-0 top-0 z-30 px-3 pt-[calc(env(safe-area-inset-top)+8px)] transition-[translate,opacity] duration-300 ease-out",
+        hidden && "-translate-y-[120%] opacity-0"
+      )}
+    >
+      <div
+        className={cn(
+          "pointer-events-auto mx-auto flex h-12 max-w-3xl items-center gap-1.5 rounded-full pr-1.5 pl-3",
+          glass
+        )}
+      >
+        {children}
+      </div>
     </header>
   )
 }

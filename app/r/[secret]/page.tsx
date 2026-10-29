@@ -138,13 +138,11 @@ export default async function ShelfPage({
               })}
             </div>
 
-            <p className="py-2 text-xs text-muted-foreground">
-              {current.revealedAt
-                ? "Cap sudah dibuka. Waktunya ngobrol."
-                : counts[other] > 0
-                  ? `${"[ · ] ".repeat(Math.min(counts[other], 6))} ${counts[other]} cap ${room.names[other]}, masih rahasia`
-                  : `${room.names[other]} belum kasih cap.`}
-            </p>
+            {!current.revealedAt && counts[other] > 0 && (
+              <p className="py-1 text-xs text-muted-foreground">
+                {counts[other]} cap {room.names[other]} masih rahasia
+              </p>
+            )}
 
             <div className="flex gap-2">
               {current.revealedAt ? (

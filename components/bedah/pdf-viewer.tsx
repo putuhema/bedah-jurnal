@@ -35,6 +35,8 @@ export type PdfViewerHandle = {
   scrollToPage: (page: number, behavior?: ScrollBehavior) => void
   /** Plain text of a page (empty string if it can't be read). */
   getPageText: (page: number) => Promise<string>
+  /** Zoom so the text column fills the screen (the empty margins go off to the sides). */
+  fitToText?: () => Promise<void>
 }
 
 type Props = {
@@ -46,6 +48,8 @@ type Props = {
   zoom: number
   /** Pinching the paper with two fingers asks for a new zoom (1 to MAX_ZOOM). */
   onZoomChange?: (zoom: number) => void
+  /** Reading mode: warm paper, a touch more contrast. */
+  reading?: boolean
   marks: Mark[]
   initialPage: number
   partner: { seat: Seat; name: string; page: number | null } | null
@@ -125,6 +129,7 @@ export const PdfViewer = React.forwardRef<PdfViewerHandle, Props>(
       pageCount,
       zoom,
       onZoomChange,
+      reading = false,
       marks,
       initialPage,
       partner,
@@ -314,6 +319,7 @@ export const PdfViewer = React.forwardRef<PdfViewerHandle, Props>(
     React.useEffect(() => {
       pageChange.current = onPageChange
     })
+    const currentPage = React.useRef(initialPage)
     React.useEffect(() => {
       let frame = 0
       let last = 0
@@ -330,6 +336,7 @@ export const PdfViewer = React.forwardRef<PdfViewerHandle, Props>(
             const n = Number(el.dataset.page)
             if (n !== last) {
               last = n
+              currentPage.current = n
               pageChange.current(n)
             }
             break
@@ -362,6 +369,70 @@ export const PdfViewer = React.forwardRef<PdfViewerHandle, Props>(
             .trim()
         } catch {
           return ""
+        }
+      },
+      async fitToText() {
+        const pdf = docRef.current
+        const area = wrapRef.current
+        if (!pdf || !area || !width) return
+        const now = currentPage.current
+        // sample the pages around you; percentiles ignore stray page numbers in the margin
+        const lefts: number[] = []
+        const rights: number[] = []
+        const pages = [now - 1, now, now + 1].filter(
+          (n) => n >= 1 && n <= pdf.numPages
+        )
+        for (const n of pages) {
+          const page = await pdf.getPage(n)
+          const viewport = page.getViewport({ scale: 1 })
+          const content = await page.getTextContent()
+          for (const item of content.items) {
+            if (!("str" in item) || !item.str.trim() || item.width <= 0)
+              continue
+            const [x, y] = [item.transform[4], item.transform[5]]
+            const [a] = viewport.convertToViewportPoint(x, y)
+            const [b] = viewport.convertToViewportPoint(x + item.width, y)
+            lefts.push(Math.min(a, b) / viewport.width)
+            rights.push(Math.max(a, b) / viewport.width)
+          }
+        }
+        if (lefts.length < 5) return
+        const left = Math.max(0, percentile(lefts, 0.02))
+        const right = Math.min(1, percentile(rights, 0.98))
+        if (right - left < 0.2) return
+
+        const base = Math.min(width, MAX_FIT_WIDTH)
+        const margin = 12
+        // phones: the text fills the width; big screens: a comfortable column
+        const target = Math.min(area.clientWidth - margin * 2, 820)
+        const fit = Math.min(
+          MAX_ZOOM,
+          Math.max(1, target / ((right - left) * base))
+        )
+        const pageEl = area.querySelector<HTMLElement>(`[data-page="${now}"]`)
+        const relY = pageEl
+          ? Math.max(
+              0,
+              (area.scrollTop - pageEl.offsetTop) / pageEl.offsetHeight
+            )
+          : 0
+        const anchor = {
+          page: now,
+          relX: left - margin / (base * fit),
+          relY,
+          fx: 0,
+          // keep the top of the view clear of the floating page label
+          fy:
+            pageEl && relY === 0
+              ? parseFloat(getComputedStyle(area).paddingTop)
+              : 0,
+        }
+        const nextWidth = Math.floor((base * Math.round(fit * 20)) / 20)
+        if (nextWidth === Math.floor(base * zoomRef.current)) {
+          placeAnchor(area, anchor)
+        } else {
+          pinchAnchor.current = anchor
+          zoomChange.current?.(Math.round(fit * 20) / 20)
         }
       },
       scrollToPage(page: number, behavior: ScrollBehavior = "smooth") {
@@ -532,20 +603,12 @@ export const PdfViewer = React.forwardRef<PdfViewerHandle, Props>(
 
     const pageWidth = Math.floor(Math.min(width, MAX_FIT_WIDTH) * zoom)
 
-    // after a pinch, put the spot that was under your fingers back under them
+    // after a zoom change, put the spot you were looking at back in place
     React.useLayoutEffect(() => {
       const anchor = pinchAnchor.current
-      const area = wrapRef.current
-      if (!anchor || !area) return
+      if (!anchor || !wrapRef.current) return
       pinchAnchor.current = null
-      const page = area.querySelector<HTMLElement>(
-        `[data-page="${anchor.page}"]`
-      )
-      if (!page) return
-      area.scrollLeft =
-        page.offsetLeft + anchor.relX * page.offsetWidth - anchor.fx
-      area.scrollTop =
-        page.offsetTop + anchor.relY * page.offsetHeight - anchor.fy
+      placeAnchor(wrapRef.current, anchor)
     }, [pageWidth])
 
     if (error) {
@@ -558,7 +621,12 @@ export const PdfViewer = React.forwardRef<PdfViewerHandle, Props>(
       <div
         ref={setWrap}
         data-slot="reader-scroll"
-        className="relative min-h-0 min-w-0 flex-1 touch-pan-x touch-pan-y overflow-auto overscroll-contain px-0 pt-4 pb-[calc(var(--nav-space,0px)+1rem)] sm:px-4"
+        data-reading={reading || undefined}
+        className={cn(
+          "relative min-h-0 min-w-0 flex-1 touch-pan-x touch-pan-y overflow-auto overscroll-contain px-0 pt-[calc(var(--top-space,0px)+0.75rem)] pb-[calc(var(--nav-space,0px)+1rem)] transition-colors duration-300 sm:px-4",
+          // reading mode: warm paper and slightly darker ink
+          reading && "bg-[#e9e1d0]"
+        )}
       >
         <div ref={contentRef} className="mx-auto flex w-max flex-col gap-3">
           {width > 0 &&
@@ -585,6 +653,22 @@ export const PdfViewer = React.forwardRef<PdfViewerHandle, Props>(
     )
   }
 )
+
+function percentile(values: number[], p: number) {
+  const sorted = [...values].sort((a, b) => a - b)
+  return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))]
+}
+
+/** Scroll so a spot on a page (fractions of its size) sits at (fx, fy) in the reader. */
+function placeAnchor(
+  area: HTMLElement,
+  anchor: { page: number; relX: number; relY: number; fx: number; fy: number }
+) {
+  const page = area.querySelector<HTMLElement>(`[data-page="${anchor.page}"]`)
+  if (!page) return
+  area.scrollLeft = page.offsetLeft + anchor.relX * page.offsetWidth - anchor.fx
+  area.scrollTop = page.offsetTop + anchor.relY * page.offsetHeight - anchor.fy
+}
 
 /** A rect in viewport coordinates → position inside the scroll area's content. */
 function toContent(area: HTMLElement, rect: DOMRect) {
@@ -730,7 +814,7 @@ function PdfPage({
     <div
       ref={boxRef}
       data-page={number}
-      className="relative scroll-mt-20 overflow-hidden bg-white shadow-[0_0_0_1px_var(--border)]"
+      className="relative scroll-mt-[calc(var(--top-space,0px)+0.5rem)] overflow-hidden bg-white shadow-[0_0_0_1px_var(--border)]"
       style={{ width, height }}
     >
       {!rendered && <Skeleton className="absolute inset-0 rounded-none" />}

@@ -233,9 +233,10 @@ try {
   await a.waitForFunction(() => document.querySelector('[data-page="1"]').getBoundingClientRect().width < 420)
 
   console.log("5. S reads: Putu's mark stays hidden")
+  await b.goto(roomUrl)
+  await b.getByText("1 cap Putu masih rahasia").waitFor({ timeout: 10000 })
   await b.goto(`${roomUrl}/e/1`)
   await b.waitForSelector('[data-page="1"] .textLayer span', { timeout: 20000 })
-  await b.getByText("1 cap Putu tersembunyi").waitFor({ timeout: 10000 })
   check((await b.locator('[data-page="1"] button', { hasText: "[wah!]" }).count()) === 0, "Putu's stamp is hidden from S")
   await selectText(b, 2, "unexpected harmonies")
   // like a person: tap the note box (this clears the text selection), type slowly, pause
