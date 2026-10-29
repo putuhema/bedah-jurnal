@@ -5,9 +5,9 @@ import { AddEditionDialog } from "@/components/bedah/add-edition-dialog"
 import { Cover, Logo, Presence, TopBar } from "@/components/bedah/bits"
 import { seatBg, seatText } from "@/lib/seat-style"
 import {
+  AccountMenu,
   ChangeEditionButton,
   PrimaryLink,
-  RoomFooter,
 } from "@/components/bedah/shelf-client"
 import {
   Empty,
@@ -68,6 +68,7 @@ export default async function ShelfPage({
         <Logo />
         <span className="flex-1" />
         <Presence />
+        <AccountMenu />
       </TopBar>
 
       {current &&
@@ -237,7 +238,6 @@ export default async function ShelfPage({
           </section>
         )}
       </main>
-      <RoomFooter />
     </>
   )
 }

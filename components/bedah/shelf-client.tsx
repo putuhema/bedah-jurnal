@@ -18,10 +18,17 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import { Kbd } from "@/components/ui/kbd"
 import { toast } from "@/components/ui/toast"
 import { useHotkey } from "@/hooks/use-hotkey"
+import { seatBg, seatText } from "@/lib/seat-style"
+import { cn } from "@/lib/utils"
 
 /** Main call to action on the shelf; "M" opens it. */
 export function PrimaryLink({
@@ -54,7 +61,8 @@ function noopSubscribe() {
   return () => {}
 }
 
-export function RoomFooter() {
+/** You, in the header: who you're signed in as, switching person, notifications. */
+export function AccountMenu() {
   const { secret, names, seat } = useRoom()
   const browserPermission = React.useSyncExternalStore(
     noopSubscribe,
@@ -83,19 +91,42 @@ export function RoomFooter() {
   }
 
   return (
-    <footer className="mt-auto flex flex-wrap items-center gap-2 border-t border-rail px-4 py-4 text-xs text-muted-foreground">
-      <span>Masuk sebagai {names[seat]}.</span>
-      <Button variant="ghost" size="xs" onClick={switchPerson}>
-        <UserRoundIcon data-icon="inline-start" />
-        Ganti orang
-      </Button>
-      {permission === "default" && (
-        <Button variant="ghost" size="xs" onClick={enableNotifications}>
-          <BellIcon data-icon="inline-start" />
-          Nyalakan notifikasi
+    <Popover>
+      <PopoverTrigger
+        aria-label={`Masuk sebagai ${names[seat]}`}
+        className={cn(
+          "grid size-8 shrink-0 place-items-center rounded-full text-xs font-medium text-white uppercase",
+          seatBg[seat]
+        )}
+      >
+        {names[seat].slice(0, 1)}
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-56 gap-1 p-1.5">
+        <p className="px-2 py-1.5 text-xs text-muted-foreground">
+          Masuk sebagai <span className={seatText[seat]}>{names[seat]}</span>
+        </p>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="justify-start"
+          onClick={switchPerson}
+        >
+          <UserRoundIcon data-icon="inline-start" />
+          Ganti orang
         </Button>
-      )}
-    </footer>
+        {permission === "default" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="justify-start"
+            onClick={enableNotifications}
+          >
+            <BellIcon data-icon="inline-start" />
+            Nyalakan notifikasi
+          </Button>
+        )}
+      </PopoverContent>
+    </Popover>
   )
 }
 

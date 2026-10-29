@@ -35,6 +35,7 @@ import {
   type ArticleViewerHandle,
 } from "@/components/bedah/article-viewer"
 import { ChatPanel } from "@/components/bedah/chat-panel"
+import { PdfReflow } from "@/components/bedah/pdf-reflow"
 import { glass } from "@/components/bedah/floating-nav"
 import {
   formatZoom,
@@ -159,16 +160,19 @@ export function ReadingRoom({
   // leaving the reader always leaves reading mode
   React.useEffect(() => () => setReadingMode(false), [])
 
+  // reading mode text size (PDFs are shown as plain text there)
+  const [textSize, setTextSize] = React.useState(1)
+
   function enterReading() {
     setChatOpen(false)
+    setFloating(null)
     setReadingMode(true)
-    // let the header and nav slide away first, then fit the text to the screen
-    setTimeout(() => void viewer.current?.fitToText?.(), 50)
   }
 
   function exitReading() {
+    setFloating(null)
     setReadingMode(false)
-    setZoom(1)
+    // the paper view comes back on the page you reached
     const keep = pageRef.current
     requestAnimationFrame(() =>
       requestAnimationFrame(() => viewer.current?.scrollToPage(keep, "instant"))
@@ -352,7 +356,11 @@ export function ReadingRoom({
       const target = event.target as Node
       if (cardRef.current?.contains(target)) return
       // a new selection on the page replaces the card by itself
-      if (target instanceof Element && target.closest(".textLayer")) return
+      if (
+        target instanceof Element &&
+        target.closest(".textLayer, [data-reflow]")
+      )
+        return
       setFloating(null)
     }
     function onKeyDown(event: KeyboardEvent) {
@@ -797,11 +805,29 @@ export function ReadingRoom({
             }
             overlay={floatingCard}
           />
+        ) : reading ? (
+          <PdfReflow
+            ref={viewer}
+            url={pdfUrl}
+            textSize={textSize}
+            marks={marks}
+            initialPage={page}
+            partner={
+              otherPresence?.edition === edition.number
+                ? { seat: other, name: names[other], page: otherPresence.page }
+                : null
+            }
+            onPageChange={setPage}
+            onSelect={onSelect}
+            onMarkTag={(mark, anchor) =>
+              setFloating({ kind: "mark", mark, anchor })
+            }
+            overlay={floatingCard}
+          />
         ) : (
           <PdfViewer
             ref={viewer}
             docKey={edition.id}
-            reading={reading}
             url={pdfUrl}
             pageCount={edition.pageCount}
             zoom={zoom}
@@ -850,6 +876,30 @@ export function ReadingRoom({
             )}
           >
             {positionLabel(edition, page)}
+            {!isArticle && (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTextSize((s) => Math.max(0.85, +(s - 0.1).toFixed(2)))
+                  }
+                  aria-label="Teks lebih kecil"
+                  className="ml-1 grid size-7 place-items-center rounded-full font-serif text-[13px] text-foreground hover:bg-foreground/5"
+                >
+                  A
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTextSize((s) => Math.min(1.6, +(s + 0.1).toFixed(2)))
+                  }
+                  aria-label="Teks lebih besar"
+                  className="grid size-7 place-items-center rounded-full font-serif text-[17px] text-foreground hover:bg-foreground/5"
+                >
+                  A
+                </button>
+              </>
+            )}
             <button
               type="button"
               onClick={exitReading}

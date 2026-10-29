@@ -2,6 +2,7 @@ import { notFound } from "next/navigation"
 
 import { Logo, Presence, TopBar } from "@/components/bedah/bits"
 import { KamusList } from "@/components/bedah/kamus-list"
+import { AccountMenu } from "@/components/bedah/shelf-client"
 import { getKamus, getRoom, getSeat } from "@/lib/room"
 
 export default async function KamusPage({
@@ -21,6 +22,7 @@ export default async function KamusPage({
         <Logo />
         <span className="flex-1" />
         <Presence />
+        <AccountMenu />
       </TopBar>
       <KamusList entries={entries} />
     </>

@@ -322,16 +322,3 @@
   color: var(--foreground);
 }
 
-/* reading mode: warm paper and darker ink on PDF pages */
-[data-reading] [data-page] canvas {
-  filter: contrast(1.15);
-}
-[data-reading] [data-page]::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  background: #f5ecd7;
-  mix-blend-mode: multiply;
-}

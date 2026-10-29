@@ -52,8 +52,8 @@ export function Presence() {
           online ? cn(seatBg[other], "animate-pulse") : "bg-muted-foreground/40"
         )}
       />
-      {names[other]}
-      <span className="text-muted-foreground">
+      <span className="max-w-20 truncate">{names[other]}</span>
+      <span className="text-muted-foreground max-sm:hidden">
         ·{" "}
         {online
           ? otherPresence?.page
