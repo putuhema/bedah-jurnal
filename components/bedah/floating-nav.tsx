@@ -117,12 +117,12 @@ function NavItem({ tab, active }: { tab: Tab; active: boolean }) {
   )
 
   return (
+    // no overflow clipping here: the active pill slides across tabs and must stay whole
     <motion.div
       layout="position"
-      initial={{ opacity: 0, width: 0 }}
-      animate={{ opacity: 1, width: "auto" }}
-      exit={{ opacity: 0, width: 0 }}
-      className="overflow-hidden"
+      initial={{ opacity: 0, scale: 0.6 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.6 }}
     >
       {tab.href ? (
         <motion.div whileTap={{ scale: 0.92 }}>

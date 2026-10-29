@@ -2,7 +2,7 @@ import { notFound } from "next/navigation"
 import Link from "next/link"
 
 import { AddEditionDialog } from "@/components/bedah/add-edition-dialog"
-import { Cover, Logo, Presence, TopBar } from "@/components/bedah/bits"
+import { Logo, Presence, TopBar } from "@/components/bedah/bits"
 import { seatBg, seatText } from "@/lib/seat-style"
 import {
   AccountMenu,
@@ -87,10 +87,6 @@ export default async function ShelfPage({
       <main className="mx-auto flex w-full max-w-xl flex-1 flex-col">
         {current && progress && counts ? (
           <section className="flex flex-col gap-3 px-4 pt-5 pb-6">
-            <Cover number={current.number} className="h-30" />
-            <p className="text-xs text-muted-foreground">
-              edisi minggu ini · pilihan {room.names[current.pickedBy]}
-            </p>
             <h1 className="font-serif text-[30px] leading-[1.08] font-light tracking-tight text-primary italic">
               {current.title}
             </h1>

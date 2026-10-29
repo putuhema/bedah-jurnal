@@ -127,7 +127,7 @@ try {
   await b.getByText("Kamu siapa?").waitFor()
   await shot(b, "seat-picker")
   await b.getByRole("button", { name: /^S/ }).click()
-  await b.getByText("edisi minggu ini").waitFor()
+  await b.getByRole("button", { name: /Mulai baca/ }).waitFor()
   await shot(b, "shelf-b")
 
   console.log("4. Putu stamps a sentence" + (AI ? ", after asking AI" : ""))
