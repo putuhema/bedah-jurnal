@@ -1,15 +1,33 @@
-import { Geist, Geist_Mono } from "next/font/google"
+import type { Metadata, Viewport } from "next"
+import { IBM_Plex_Mono, IBM_Plex_Serif } from "next/font/google"
 
 import "./globals.css"
-import { ThemeProvider } from "@/components/theme-provider"
-import { cn } from "@/lib/utils";
+import { Toaster } from "@/components/ui/toast"
+import { cn } from "@/lib/utils"
 
-const geist = Geist({subsets:['latin'],variable:'--font-sans'})
-
-const fontMono = Geist_Mono({
+const plexMono = IBM_Plex_Mono({
   subsets: ["latin"],
-  variable: "--font-mono",
+  weight: ["400", "500"],
+  variable: "--font-plex-mono",
 })
+
+const plexSerif = IBM_Plex_Serif({
+  subsets: ["latin"],
+  weight: ["300", "400"],
+  style: ["normal", "italic"],
+  variable: "--font-plex-serif",
+})
+
+export const metadata: Metadata = {
+  title: "Bedah Jurnal",
+  description: "Satu jurnal seminggu, berdua dari jauh.",
+}
+
+export const viewport: Viewport = {
+  themeColor: "#f4f4f2",
+  width: "device-width",
+  initialScale: 1,
+}
 
 export default function RootLayout({
   children,
@@ -17,13 +35,9 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html
-      lang="en"
-      suppressHydrationWarning
-      className={cn("antialiased", fontMono.variable, "font-sans", geist.variable)}
-    >
+    <html lang="id" className={cn(plexMono.variable, plexSerif.variable)}>
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <Toaster>{children}</Toaster>
       </body>
     </html>
   )

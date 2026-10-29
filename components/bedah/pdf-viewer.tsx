@@ -1,0 +1,684 @@
+"use client"
+
+import * as React from "react"
+import type {
+  PDFDocumentLoadingTask,
+  PDFDocumentProxy,
+  RenderTask,
+} from "pdfjs-dist"
+
+import { seatBg, seatHighlight, seatText } from "@/lib/seat-style"
+import { Skeleton } from "@/components/ui/skeleton"
+import { findTwins } from "@/lib/overlap"
+import { loadPdfjs } from "@/lib/pdf"
+import {
+  REACTION_LABEL,
+  type AiNote,
+  type Mark,
+  type Rect,
+  type Seat,
+  type TextRange,
+} from "@/lib/types"
+import { cn } from "@/lib/utils"
+
+export type TextSelection = {
+  page: number
+  quote: string
+  rects: Rect[]
+  /** Articles: the selection as character offsets in the article text (rects is empty). */
+  range?: TextRange
+  /** Last selected line, in the scroll area's content coordinates, for placing the stamp card. */
+  anchor: { x: number; top: number; bottom: number }
+}
+
+export type PdfViewerHandle = {
+  scrollToPage: (page: number, behavior?: ScrollBehavior) => void
+  /** Plain text of a page (empty string if it can't be read). */
+  getPageText: (page: number) => Promise<string>
+}
+
+type Props = {
+  /** Changes when the document changes; the signed URL may change on every refresh. */
+  docKey: string
+  url: string
+  pageCount: number
+  /** 1 = fit the screen width; larger values scroll sideways. */
+  zoom: number
+  marks: Mark[]
+  initialPage: number
+  partner: { seat: Seat; name: string; page: number | null } | null
+  onPageChange: (page: number) => void
+  onSelect: (selection: TextSelection | null) => void
+  onMarkTag: (
+    mark: Mark,
+    anchor: { x: number; top: number; bottom: number }
+  ) => void
+  /** Rendered inside the scroll area (absolute positioning scrolls with the pages). */
+  overlay?: React.ReactNode
+  /** Sentences with saved AI answers but no stamp: a small "✦ AI" tag opens them. */
+  aiSpots?: AiSpot[]
+  onAiTag?: (
+    notes: AiNote[],
+    anchor: { x: number; top: number; bottom: number }
+  ) => void
+  /** Called with the real page count once the PDF is open. */
+  onPageCount?: (pages: number) => void
+  /** Scroll to these stamps and outline them (talk time follows the current card). */
+  focus?: { page: number; y: number; ids: string[] } | null
+}
+
+export type AiSpot = {
+  id: string
+  page: number
+  rects: Rect[]
+  range?: TextRange | null
+  notes: AiNote[]
+}
+
+/** Widest a page gets at 1×, so desktop pages stay a readable size. */
+const MAX_FIT_WIDTH = 880
+
+/** Merge per-span rectangles on the same line into one, so a sentence becomes a few bars. */
+function mergeRects(rects: Rect[]): Rect[] {
+  const sorted = [...rects].sort((p, q) => p.y - q.y || p.x - q.x)
+  const out: Rect[] = []
+  for (const r of sorted) {
+    const last = out.at(-1)
+    if (
+      last &&
+      Math.abs(last.y - r.y) < r.h * 0.5 &&
+      r.x <= last.x + last.w + 0.02
+    ) {
+      const right = Math.max(last.x + last.w, r.x + r.w)
+      const bottom = Math.max(last.y + last.h, r.y + r.h)
+      last.x = Math.min(last.x, r.x)
+      last.y = Math.min(last.y, r.y)
+      last.w = right - last.x
+      last.h = bottom - last.y
+    } else {
+      out.push({ ...r })
+    }
+  }
+  return out.slice(0, 60)
+}
+
+export const PdfViewer = React.forwardRef<PdfViewerHandle, Props>(
+  function PdfViewer(
+    {
+      docKey,
+      url,
+      pageCount,
+      zoom,
+      marks,
+      initialPage,
+      partner,
+      onPageChange,
+      onSelect,
+      onMarkTag,
+      overlay,
+      focus,
+      aiSpots,
+      onAiTag,
+      onPageCount,
+    },
+    ref
+  ) {
+    // the reader's own scroll area (both directions), so zoomed pages can be panned
+    const wrapRef = React.useRef<HTMLDivElement | null>(null)
+    const [scrollEl, setScrollEl] = React.useState<HTMLDivElement | null>(null)
+    const setWrap = React.useCallback((el: HTMLDivElement | null) => {
+      wrapRef.current = el
+      setScrollEl(el)
+    }, [])
+    const urlRef = React.useRef(url)
+    const [doc, setDoc] = React.useState<PDFDocumentProxy | null>(null)
+    const docRef = React.useRef<PDFDocumentProxy | null>(null)
+    const pageCountRef = React.useRef(onPageCount)
+    React.useEffect(() => {
+      pageCountRef.current = onPageCount
+    })
+    const [aspect, setAspect] = React.useState(1.294) // A4 until we know
+    const [width, setWidth] = React.useState(0)
+    const [error, setError] = React.useState<string | null>(null)
+
+    // load the document once per edition
+    React.useEffect(() => {
+      let cancelled = false
+      let task: PDFDocumentLoadingTask | null = null
+      loadPdfjs()
+        .then((pdfjs) => {
+          task = pdfjs.getDocument({ url: urlRef.current })
+          return task.promise
+        })
+        .then(async (pdf) => {
+          docRef.current = pdf
+          const first = await pdf.getPage(1)
+          const vp = first.getViewport({ scale: 1 })
+          if (cancelled) return
+          pageCountRef.current?.(pdf.numPages)
+          setAspect(vp.height / vp.width)
+          setDoc(pdf)
+        })
+        .catch((e) => {
+          console.error(e)
+          if (!cancelled) setError("PDF gagal dibuka. Coba muat ulang.")
+        })
+      return () => {
+        cancelled = true
+        void (task as PDFDocumentLoadingTask | null)?.destroy()
+      }
+    }, [docKey])
+
+    // track available width
+    React.useEffect(() => {
+      const el = wrapRef.current
+      if (!el) return
+      const observer = new ResizeObserver(([entry]) => {
+        const next = Math.floor(entry.contentRect.width)
+        setWidth((prev) => (Math.abs(prev - next) > 4 ? next : prev))
+      })
+      observer.observe(el)
+      return () => observer.disconnect()
+    }, [])
+
+    // which page is in view
+    const pageChange = React.useRef(onPageChange)
+    React.useEffect(() => {
+      pageChange.current = onPageChange
+    })
+    React.useEffect(() => {
+      let frame = 0
+      let last = 0
+      const area = wrapRef.current
+      if (!area) return
+      function check() {
+        frame = 0
+        const box = area!.getBoundingClientRect()
+        const line = box.top + area!.clientHeight * 0.35
+        const pages = area!.querySelectorAll<HTMLElement>("[data-page]")
+        for (const el of pages) {
+          const page = el.getBoundingClientRect()
+          if (page.top <= line && page.bottom > line) {
+            const n = Number(el.dataset.page)
+            if (n !== last) {
+              last = n
+              pageChange.current(n)
+            }
+            break
+          }
+        }
+      }
+      function onScroll() {
+        if (!frame) frame = requestAnimationFrame(check)
+      }
+      area.addEventListener("scroll", onScroll, { passive: true })
+      check()
+      return () => {
+        area.removeEventListener("scroll", onScroll)
+        cancelAnimationFrame(frame)
+      }
+    }, [doc, scrollEl])
+
+    React.useImperativeHandle(ref, () => ({
+      async getPageText(page: number) {
+        const pdf = docRef.current
+        if (!pdf || page < 1 || page > pdf.numPages) return ""
+        try {
+          const content = await (await pdf.getPage(page)).getTextContent()
+          return content.items
+            .map((item) =>
+              "str" in item ? item.str + (item.hasEOL ? "\n" : " ") : ""
+            )
+            .join("")
+            .replace(/[ \t]+/g, " ")
+            .trim()
+        } catch {
+          return ""
+        }
+      },
+      scrollToPage(page: number, behavior: ScrollBehavior = "smooth") {
+        wrapRef.current
+          ?.querySelector(`[data-page="${page}"]`)
+          ?.scrollIntoView({ behavior, block: "start", inline: "nearest" })
+      },
+    }))
+
+    // follow the focused stamp: scroll so it sits in the upper part of the view
+    const focusKey = focus
+      ? `${focus.page}:${focus.y}:${focus.ids.join(",")}`
+      : ""
+    const focusIds = React.useMemo(
+      () => new Set(focusKey ? focusKey.split(":")[2].split(",") : []),
+      [focusKey]
+    )
+    React.useEffect(() => {
+      const area = wrapRef.current
+      if (!focus || !area || !width) return
+      const frame = requestAnimationFrame(() => {
+        const page = area.querySelector<HTMLElement>(
+          `[data-page="${focus.page}"]`
+        )
+        if (!page) return
+        const top =
+          page.offsetTop +
+          focus.y * page.offsetHeight -
+          area.clientHeight * 0.25
+        area.scrollTo({ top: Math.max(0, top), behavior: "smooth" })
+      })
+      return () => cancelAnimationFrame(frame)
+      // re-run only when the focused stamp (or the layout width) changes
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [focusKey, width, zoom])
+
+    // jump to the starting page once the document is ready,
+    // unless you already started scrolling or tapping while it loaded
+    const jumped = React.useRef(false)
+    React.useEffect(() => {
+      const area = scrollEl
+      if (!area) return
+      const skip = () => {
+        jumped.current = true
+      }
+      const events = ["pointerdown", "wheel", "touchstart", "keydown"] as const
+      events.forEach((e) => area.addEventListener(e, skip, { passive: true }))
+      return () => events.forEach((e) => area.removeEventListener(e, skip))
+    }, [scrollEl])
+    React.useEffect(() => {
+      if (!doc || !width || jumped.current) return
+      jumped.current = true
+      if (initialPage > 1) {
+        requestAnimationFrame(() =>
+          wrapRef.current
+            ?.querySelector(`[data-page="${initialPage}"]`)
+            ?.scrollIntoView({ block: "start" })
+        )
+      }
+    }, [doc, width, initialPage])
+
+    // text selection → stamp picker
+    const selectRef = React.useRef(onSelect)
+    React.useEffect(() => {
+      selectRef.current = onSelect
+    })
+    React.useEffect(() => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      function read() {
+        const selection = window.getSelection()
+        if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+          selectRef.current(null)
+          return
+        }
+        const range = selection.getRangeAt(0)
+        const start = (
+          range.startContainer.parentElement ?? null
+        )?.closest<HTMLElement>("[data-page]")
+        const end = (
+          range.endContainer.parentElement ?? null
+        )?.closest<HTMLElement>("[data-page]")
+        if (!start || start !== end || !wrapRef.current?.contains(start)) {
+          selectRef.current(null)
+          return
+        }
+        const box = start.getBoundingClientRect()
+        const raw = Array.from(range.getClientRects())
+          .filter((r) => r.width > 1 && r.height > 1)
+          .map((r) => ({
+            x: (r.left - box.left) / box.width,
+            y: (r.top - box.top) / box.height,
+            w: r.width / box.width,
+            h: r.height / box.height,
+          }))
+          .filter(
+            (r) =>
+              r.x >= -0.01 &&
+              r.y >= -0.01 &&
+              r.x + r.w <= 1.01 &&
+              r.y + r.h <= 1.01
+          )
+        const quote = selection.toString().replace(/\s+/g, " ").trim()
+        if (raw.length === 0 || quote.length < 2) {
+          selectRef.current(null)
+          return
+        }
+        // the visually last line of the selection (rect order isn't guaranteed,
+        // and whole elements inside the range add their own big boxes)
+        const lines = Array.from(range.getClientRects()).filter(
+          (r) => r.width > 1 && r.height > 1 && r.height < 80
+        )
+        const lastLine = lines.reduce((best, r) =>
+          r.bottom > best.bottom + 2 ||
+          (Math.abs(r.bottom - best.bottom) <= 2 && r.right > best.right)
+            ? r
+            : best
+        )
+        selectRef.current({
+          page: Number(start.dataset.page),
+          quote,
+          rects: mergeRects(raw),
+          anchor: toContent(wrapRef.current!, lastLine),
+        })
+      }
+      function onChange() {
+        clearTimeout(timer)
+        timer = setTimeout(read, 250)
+      }
+      document.addEventListener("selectionchange", onChange)
+      return () => {
+        document.removeEventListener("selectionchange", onChange)
+        clearTimeout(timer)
+      }
+    }, [])
+
+    // when you both stamped the same sentence, the second tag goes below the first
+    const stackedTags = React.useMemo(
+      () => new Set(findTwins(marks).map(([, second]) => second.id)),
+      [marks]
+    )
+
+    const marksByPage = React.useMemo(() => {
+      const map = new Map<number, Mark[]>()
+      for (const m of marks) map.set(m.page, [...(map.get(m.page) ?? []), m])
+      return map
+    }, [marks])
+
+    const aiSpotsByPage = React.useMemo(() => {
+      const map = new Map<number, AiSpot[]>()
+      for (const spot of aiSpots ?? [])
+        map.set(spot.page, [...(map.get(spot.page) ?? []), spot])
+      return map
+    }, [aiSpots])
+
+    const aiTagClick = React.useCallback(
+      (notes: AiNote[], rect: DOMRect) => {
+        if (wrapRef.current) onAiTag?.(notes, toContent(wrapRef.current, rect))
+      },
+      [onAiTag]
+    )
+
+    const tagClick = React.useCallback(
+      (mark: Mark, rect: DOMRect) => {
+        if (wrapRef.current) onMarkTag(mark, toContent(wrapRef.current, rect))
+      },
+      [onMarkTag]
+    )
+
+    if (error) {
+      return (
+        <p className="px-4 py-16 text-center text-muted-foreground">{error}</p>
+      )
+    }
+
+    const pageWidth = Math.floor(Math.min(width, MAX_FIT_WIDTH) * zoom)
+
+    return (
+      <div
+        ref={setWrap}
+        data-slot="reader-scroll"
+        className="relative min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain px-0 py-4 sm:px-4"
+      >
+        <div className="mx-auto flex w-max flex-col gap-3">
+          {width > 0 &&
+            Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
+              <PdfPage
+                key={n}
+                doc={doc}
+                number={n}
+                width={pageWidth}
+                aspect={aspect}
+                marks={marksByPage.get(n) ?? []}
+                partner={partner && partner.page === n ? partner : null}
+                root={scrollEl}
+                stackedTags={stackedTags}
+                focusIds={focusIds}
+                onMarkTag={tagClick}
+                aiSpots={aiSpotsByPage.get(n) ?? []}
+                onAiTag={aiTagClick}
+              />
+            ))}
+        </div>
+        {overlay}
+      </div>
+    )
+  }
+)
+
+/** A rect in viewport coordinates → position inside the scroll area's content. */
+function toContent(area: HTMLElement, rect: DOMRect) {
+  const box = area.getBoundingClientRect()
+  const left = rect.left - box.left + area.scrollLeft
+  const right = rect.right - box.left + area.scrollLeft
+  return {
+    x: (left + right) / 2,
+    top: rect.top - box.top + area.scrollTop,
+    bottom: rect.bottom - box.top + area.scrollTop,
+  }
+}
+
+function PdfPage({
+  doc,
+  number,
+  width,
+  aspect,
+  marks,
+  partner,
+  root,
+  stackedTags,
+  focusIds,
+  onMarkTag,
+  aiSpots,
+  onAiTag,
+}: {
+  doc: PDFDocumentProxy | null
+  number: number
+  width: number
+  aspect: number
+  marks: Mark[]
+  partner: { seat: Seat; name: string } | null
+  root: HTMLElement | null
+  stackedTags: Set<string>
+  focusIds: Set<string>
+  aiSpots: AiSpot[]
+  onAiTag: (notes: AiNote[], rect: DOMRect) => void
+  onMarkTag: (mark: Mark, rect: DOMRect) => void
+}) {
+  const boxRef = React.useRef<HTMLDivElement>(null)
+  const canvasRef = React.useRef<HTMLCanvasElement>(null)
+  const textRef = React.useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = React.useState(false)
+  // real height once rendered at this width; an estimate from the first page until then
+  const [measured, setMeasured] = React.useState<{
+    width: number
+    height: number
+  } | null>(null)
+  const height =
+    measured?.width === width ? measured.height : Math.round(width * aspect)
+  const [rendered, setRendered] = React.useState(false)
+
+  React.useEffect(() => {
+    const el = boxRef.current
+    if (!el || !root) return
+    // render pages a bit before they scroll into the reader's view
+    const observer = new IntersectionObserver(
+      ([entry]) => entry.isIntersecting && setVisible(true),
+      { root, rootMargin: "1200px 600px" }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [root])
+
+  React.useEffect(() => {
+    if (!doc || !visible) return
+    let cancelled = false
+    let task: RenderTask | null = null
+    let textLayer: { cancel: () => void } | null = null
+
+    ;(async () => {
+      const pdfjs = await import("pdfjs-dist")
+      const page = await doc.getPage(number)
+      if (cancelled) return
+      const scale = width / page.getViewport({ scale: 1 }).width
+      const viewport = page.getViewport({ scale })
+      setMeasured({ width, height: Math.round(viewport.height) })
+
+      const canvas = canvasRef.current
+      const box = boxRef.current
+      const text = textRef.current
+      if (!canvas || !box || !text) return
+
+      const dpr = Math.min(window.devicePixelRatio || 1, 2.5)
+      canvas.width = Math.floor(viewport.width * dpr)
+      canvas.height = Math.floor(viewport.height * dpr)
+      canvas.style.width = `${Math.floor(viewport.width)}px`
+      canvas.style.height = `${Math.floor(viewport.height)}px`
+      box.style.setProperty("--total-scale-factor", String(scale))
+      box.style.setProperty("--scale-factor", String(scale))
+
+      task = page.render({
+        canvas,
+        viewport,
+        transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
+      })
+      await task.promise
+
+      text.replaceChildren()
+      const layer = new pdfjs.TextLayer({
+        textContentSource: page.streamTextContent(),
+        container: text,
+        viewport,
+      })
+      textLayer = layer
+      await layer.render()
+      if (!cancelled) setRendered(true)
+    })().catch((e) => {
+      if (!cancelled && e?.name !== "RenderingCancelledException")
+        console.error(e)
+    })
+
+    return () => {
+      cancelled = true
+      task?.cancel()
+      textLayer?.cancel()
+    }
+  }, [doc, visible, number, width])
+
+  return (
+    <div
+      ref={boxRef}
+      data-page={number}
+      className="relative scroll-mt-20 overflow-hidden bg-white shadow-[0_0_0_1px_var(--border)]"
+      style={{ width, height }}
+    >
+      {!rendered && <Skeleton className="absolute inset-0 rounded-none" />}
+      <canvas ref={canvasRef} className="absolute inset-0 select-none" />
+
+      {/* highlights sit under the transparent text layer so text stays selectable */}
+      <div className="pointer-events-none absolute inset-0 z-[1]">
+        {marks.flatMap((m) =>
+          m.rects.map((r, i) => (
+            <span
+              key={`${m.id}-${i}`}
+              className={cn(
+                "absolute border-b-2 mix-blend-multiply",
+                seatHighlight[m.seat],
+                focusIds.has(m.id) &&
+                  "outline-2 outline-offset-2 outline-foreground/70 outline-dashed"
+              )}
+              data-focused={focusIds.has(m.id) || undefined}
+              style={{
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.w * 100}%`,
+                height: `${r.h * 100}%`,
+              }}
+            />
+          ))
+        )}
+      </div>
+
+      <div ref={textRef} className="textLayer" />
+
+      {/* stamp tags, clickable, above the text layer */}
+      {marks.map((m) => {
+        const last = m.rects.at(-1)
+        if (!last) return null
+        return (
+          <button
+            key={m.id}
+            type="button"
+            onClick={(e) =>
+              onMarkTag(m, e.currentTarget.getBoundingClientRect())
+            }
+            className={cn(
+              "absolute z-[3] -translate-x-full rounded-sm bg-card/90 px-1 font-mono text-[10px] leading-4 ring-1 ring-border",
+              seatText[m.seat],
+              stackedTags.has(m.id) ? "translate-y-[18px]" : "translate-y-0.5"
+            )}
+            style={{
+              left: `${Math.min(1, last.x + last.w) * 100}%`,
+              top: `${(last.y + last.h) * 100}%`,
+            }}
+          >
+            [{REACTION_LABEL[m.reaction]}]
+          </button>
+        )
+      })}
+
+      {/* saved AI answers without a stamp: a dotted underline and a "✦ AI" tag */}
+      {aiSpots.map((spot) => {
+        const last = spot.rects.at(-1)
+        if (!last) return null
+        return (
+          <React.Fragment key={spot.id}>
+            {spot.rects.map((r, i) => (
+              <span
+                key={i}
+                className="pointer-events-none absolute z-[1] border-b border-dotted border-muted-foreground/70"
+                style={{
+                  left: `${r.x * 100}%`,
+                  top: `${r.y * 100}%`,
+                  width: `${r.w * 100}%`,
+                  height: `${r.h * 100}%`,
+                }}
+              />
+            ))}
+            <button
+              type="button"
+              data-slot="ai-tag"
+              onClick={(e) =>
+                onAiTag(spot.notes, e.currentTarget.getBoundingClientRect())
+              }
+              className="absolute z-[3] -translate-x-full translate-y-0.5 rounded-sm bg-card/90 px-1 font-mono text-[10px] leading-4 text-muted-foreground ring-1 ring-border hover:text-foreground"
+              style={{
+                left: `${Math.min(1, last.x + last.w) * 100}%`,
+                top: `${(last.y + last.h) * 100}%`,
+              }}
+            >
+              ✦ AI{spot.notes.length > 1 ? ` ×${spot.notes.length}` : ""}
+            </button>
+          </React.Fragment>
+        )
+      })}
+
+      {partner && (
+        <span
+          className={cn(
+            "pointer-events-none absolute top-2 -left-px z-[3] flex items-center gap-1 rounded-r-sm bg-card py-0.5 pr-1.5 pl-1 text-[10px] ring-1 ring-border",
+            seatText[partner.seat]
+          )}
+        >
+          <span
+            className={cn(
+              "size-1.5 animate-pulse rounded-full",
+              seatBg[partner.seat]
+            )}
+          />
+          {partner.name} di sini
+        </span>
+      )}
+
+      <span className="pointer-events-none absolute right-2 bottom-1.5 z-[3] text-[10px] text-muted-foreground">
+        {number}
+      </span>
+    </div>
+  )
+}
